@@ -1,0 +1,9 @@
+{
+    "C_Cpp.default.includePath": [
+        "/usr/include/GL",
+        "/usr/local/include"
+    ],
+    "files.associations": {
+        "cmath": "cpp"
+    }
+}
