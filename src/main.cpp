@@ -8,6 +8,8 @@
 
 #include <iostream>
 #include <vector>
+#include <unordered_map>
+#include <list>
 
 #include "LoadShaders.h"
 #include "camera.h"
@@ -52,15 +54,13 @@ bool firstMouse = true;
 
 glm::vec3 lightPos(0.0f, 1.0f, 3.0f);
 
-const float planeDim = 50.0f;
-
 float zTrans = 0.0f;
 float xTrans = 0.0f;
 float qScale = 10.0f;
 
 int debugSwitch = 0;
 
-int num_fluid_particles = 1000;
+int num_fluid_particles = 100;
 int maxIterations = 4;
 
 const float gravity_accel = -9.8f;
@@ -79,8 +79,15 @@ float density0 = 6378.0f;
 float* density;
 float* lambda;
 
-float bboxDim = 1.0f;
+float bboxDim = 2.0f;
 float epsR = 600.0f;
+
+int cell_size = 1.0f;
+float inv_cell_size = 1.0f;
+
+std::unordered_map<int, std::list<int>> gridHashMap;
+
+int gridWidth = 4;
 
 float randomFloat()
 {
@@ -95,6 +102,22 @@ float randomFloatRange(float a, float b)
     return a+r;
 }
 
+int spatial_hash(glm::vec3 pos)
+{
+    return (int)pos.x*inv_cell_size + ((int)pos.y*inv_cell_size)*gridWidth;
+}
+
+void hashParticlePositions()
+{
+    for (int i = 0; i < num_fluid_particles; i++)
+    {
+        //I think it should be p[i] and not x[i] since I'm only calling this at the moment after the predict step.
+        int gridCell = spatial_hash(p[i]);
+        gridHashMap[gridCell].push_front(i);
+    }
+
+}
+
 void init_fluid()
 {
     x = new glm::vec3[num_fluid_particles];
@@ -103,24 +126,78 @@ void init_fluid()
 
     for (int i = 0; i < num_fluid_particles; i++)
     {
-        float xCoord = (randomFloat() - 0.5f) * bboxDim;
-        float yCoord = (randomFloat() - 0.5f) * bboxDim;
-        float zCoord = (randomFloat() - 0.5f) * bboxDim;
+        float xCoord = fabs((randomFloat() - 0.5f) * bboxDim);
+        float yCoord = fabs((randomFloat() - 0.5f) * bboxDim);
+        float zCoord = fabs((randomFloat() - 0.5f) * bboxDim);
         
         x[i] = glm::vec3(xCoord, yCoord, 0.0f);
         v[i] = glm::vec3(0.0f);
-
     }
 
     lambda = new float[num_fluid_particles];
     density = new float[num_fluid_particles];
 }
 
+//TODO:
+std::vector<int> findNeighbors(int pidx)
+{
+    int index = spatial_hash(p[pidx]);
+  //  printf("finding neighbors for %d in cell %d\n", pidx, index);
+
+    
+    //get neighboring gridCells
+    std::vector<int> neighboringCells;
+    neighboringCells.push_back(index);  
+    if (((index + 1) % gridWidth) > (index % gridWidth) && (index+1) < gridWidth*gridWidth)
+    {
+        // printf("index+1 = %d \n", index+1);
+        // printf("index+1+gw = %d \n", index+1+gridWidth);
+        // printf("index+1-gw = %d \n", index+1-gridWidth);
+    
+        neighboringCells.push_back(index+1);
+        neighboringCells.push_back(index+1+gridWidth); neighboringCells.push_back(index+1-gridWidth);
+    }
+    
+    if (((index - 1) % gridWidth) < (index % gridWidth) && (index-1)>=0)
+    {
+        // printf("index-1 = %d \n", index-1);
+        // printf("index-1+gw = %d \n", index-1+gridWidth);
+        // printf("index-1-gw = %d \n", index-1-gridWidth);
+        neighboringCells.push_back(index-1); 
+        neighboringCells.push_back(index-1+gridWidth); neighboringCells.push_back(index-1-gridWidth);
+    }
+    
+    neighboringCells.push_back(index+gridWidth);
+    neighboringCells.push_back(index-gridWidth); 
+
+    // printf("index+gw = %d \n", index+gridWidth);
+    // printf("index-gw = %d \n", index-gridWidth);
+
+    std::vector<int> neighboringParticles;
+    //then append their contents to the neighboring particles vector.
+    for (int i = 0; i < neighboringCells.size(); i++)
+    {   
+        int ni = neighboringCells[i]; 
+
+        if (ni >= 0 && ni <= (gridWidth*gridWidth)-1)
+        {
+            std::list<int> l = gridHashMap[ni];
+            for (int const& j : l)
+            {
+                neighboringParticles.push_back(j);
+            }
+        }
+    }
+    
+    return neighboringParticles;
+
+}
+
 void predict_sim_step()
 {
     glm::vec3 f_ext = glm::vec3(0.0f, gravity_accel, 0.0f);
 
-    //predict v using explicit euler and damp velocities
+    //predict v using explicit euler and then damp velocities
     for (int i = 0; i < num_fluid_particles; i++)
     {
         v[i] = v[i] + dt*f_ext;
@@ -132,6 +209,33 @@ void predict_sim_step()
     {
         p[i] = x[i] + dt*v[i];
     }
+
+    //update hashtable with predictions
+    hashParticlePositions();
+
+    // for (int i = 0; i < num_fluid_particles; i++)
+    // {
+    //     int gc = spatial_hash(p[i]);
+    //     std::list<int> ll = gridHashMap[gc];
+    //     printf("gridCell %d has the following particles:\n", gc);
+    //     for (int const& i : ll)
+    //     {
+    //         printf(" %d \n", i);
+    //     }
+    //     printf("---end cell %d---\n", gc);
+    // }
+
+    // for (int i = 0; i < num_fluid_particles; i++)
+    // {
+    //     std::vector<int> neighbors = findNeighbors(i);
+    //     for (int j = 0; j < neighbors.size(); j++)
+    //     {
+    //         int ngc = spatial_hash(p[neighbors[j]]);
+    //         printf("%d is in cell %d and has %d which is in cell %d\n", i, spatial_hash(p[i]) , neighbors[j], ngc);
+    //     }
+
+    // }
+    
 }
 
 //TODO:
@@ -140,13 +244,7 @@ void genCollisionConstraints()
     //Generate the relevant collision constraints from the predicted positions
 }
 
-//TODO:
-void findNeighbors()
-{
-
-}
-
-void computeDensity()
+void computeDensity_naive()
 {
     float h8 = powf(h,8.0f);
     float h2 = powf(h, 2.0f);
@@ -155,6 +253,8 @@ void computeDensity()
     {
         //NAIVE SEARCH - CHANGE AFTER GETTING BASICS WORKING
         float rhoi = 0.0f;
+        //implement loop over these hashed neighbors
+        //std::vector<int> neighbors = findNeighbors(i);
         for (int j = 0; j < num_fluid_particles; j++)
         {
             glm::vec3 r = p[i] - p[j];
@@ -180,7 +280,6 @@ void computeDensity()
         {
             glm::vec3 r = p[i] - p[j];
             float rd = glm::length(r);
-
             if (rd*rd < h2)
             {
                 glm::vec3 gradW = -(45.0f/((float)M_PI*h2*h2*h2))*((h-rd)*(h-rd)*r);
@@ -195,10 +294,61 @@ void computeDensity()
        // printf("sum[%d] = %f\n", i, sum_grad_C_i);
         lambda[i] = -C_i/(sum_grad_C_i+epsR);
     }
-
 }
 
-void projectDensityConstraint()
+void computeDensity()
+{
+    float h8 = powf(h,8.0f);
+    float h2 = powf(h, 2.0f);
+    //density
+    for (int i = 0; i < num_fluid_particles; i++)
+    {
+        float rhoi = 0.0f;
+        //implement loop over these hashed neighbors
+        std::vector<int> neighbors = findNeighbors(i);
+        for (int j = 0; j < neighbors.size(); j++)
+        {
+            glm::vec3 r = p[i] - p[neighbors[j]];
+            float rd = glm::length(r);
+
+            if (rd*rd < h2)
+            {
+                float W = (4.0f)/(M_PI*h8)*powf((h2 - rd*rd),3.0f);
+                rhoi += mass*W;
+            }
+        }
+        density[i] = rhoi;
+        //printf("density[%d] = %f\n", i, density[i]);
+    }
+    
+    //constraint force (lambda in the paper)
+    for (int i = 0; i < num_fluid_particles; i++)
+    {
+        float C_i = (density[i]/density0) - 1.0f;
+        //C_i = glm::max(C_i, 0.0f);
+        float sum_grad_C_i = 0.0f;
+        std::vector<int> neighbors = findNeighbors(i);
+        for (int j = 0; j < neighbors.size(); j++)
+        {
+            glm::vec3 r = p[i] - p[neighbors[j]];
+            float rd = glm::length(r);
+            if (rd*rd < h2)
+            {
+                glm::vec3 gradW = -(45.0f/((float)M_PI*h2*h2*h2))*((h-rd)*(h-rd)*r);
+                //glm::vec3 gradW = -(30.0f/((float)M_PI*h2*h2))*(((1-0.5f)*(1-0.5f)*r)/0.5f);
+
+                gradW /= density0;
+                float gradWd = glm::length(gradW);
+                sum_grad_C_i += gradWd * gradWd;
+                //printf("gradWd[%d] = %f \n",j, gradWd);
+            }
+        }
+       // printf("sum[%d] = %f\n", i, sum_grad_C_i);
+        lambda[i] = -C_i/(sum_grad_C_i+epsR);
+    }
+}
+
+void projectDensityConstraint_naive()
 {
     float h2 = h*h;
     for (int i = 0; i < num_fluid_particles; i++)
@@ -215,10 +365,39 @@ void projectDensityConstraint()
                 float W_dq = (15.0f/(M_PI*h2*h2*h2))*powf((0.2f),3.0f);
                 float s_corr = 0.1*h*powf(W_s/W_dq, 4); 
                 glm::vec3 gradW = -(45.0f/((float)M_PI*h2*h2*h2))*((h-rd)*(h-rd)*r);
-
                 //printf("s_corr[%d, %d] = %f\n", i,j, s_corr);
                // glm::vec3 gradW = -(30.0f/((float)M_PI*h2*h2))*(((1-0.1f)*(1-0.1f)*r)/0.1f);
                 constraint_sum += (lambda[i] + lambda[j] + s_corr) * gradW;
+            }
+        }
+        
+        glm::vec3 dPi = constraint_sum/density0;
+        p[i] += dPi;
+    }
+}
+
+
+void projectDensityConstraint()
+{
+    float h2 = h*h;
+    for (int i = 0; i < num_fluid_particles; i++)
+    {   
+        glm::vec3 constraint_sum = glm::vec3(0.0f);
+        std::vector<int> neighbors = findNeighbors(i);
+        for (int j = 0; j < neighbors.size(); j++)
+        {
+            glm::vec3 r = p[i] - p[neighbors[j]];
+            float rd = glm::length(r);
+
+            if (sqrtf(rd*rd) < sqrtf(h2))
+            {
+                float W_s = (15.0f/(M_PI*h2*h2*h2))*powf((h-rd),3.0f);
+                float W_dq = (15.0f/(M_PI*h2*h2*h2))*powf((0.2f),3.0f);
+                float s_corr = 0.1*h*powf(W_s/W_dq, 4); 
+                glm::vec3 gradW = -(45.0f/((float)M_PI*h2*h2*h2))*((h-rd)*(h-rd)*r);
+                //printf("s_corr[%d, %d] = %f\n", i,j, s_corr);
+               // glm::vec3 gradW = -(30.0f/((float)M_PI*h2*h2))*(((1-0.1f)*(1-0.1f)*r)/0.1f);
+                constraint_sum += (lambda[i] + lambda[neighbors[j]] + s_corr) * gradW;
             }
         }
         
@@ -239,9 +418,6 @@ void applyViscosity()
 
 void solve()
 {
-    //while (i < maxIterations)
-        //for each constraint C_i
-            //projectConstraint C_i
     int iteration = 0;
     while (iteration < maxIterations)
     {
@@ -255,17 +431,14 @@ void solve()
     for (int i = 0; i < num_fluid_particles; i++)
     {
         v[i] = (p[i]-x[i])/dt;
-        if (p[i].y <= -bboxDim )
+        if (p[i].y <= 0 )
         {
-            //printf("pvy %f\n",p[i].y);
-
             v[i] *= -0.3f;
         }
 
         applyVorticity();
         applyViscosity();
         x[i] = p[i];
-
     }
 }
 
@@ -426,6 +599,8 @@ float verts[] = {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         predict_sim_step();
+        //printf("(%f%f,%f)\n", x[4].x, x[4].y, x[4].z);
+        //return 0;
         //genCollisionConstraints();
         solve();
 
