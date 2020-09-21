@@ -60,7 +60,8 @@ float qScale = 10.0f;
 
 int debugSwitch = 0;
 
-int num_fluid_particles = 100;
+//simulation settings and variables
+int num_fluid_particles = 400;
 int maxIterations = 4;
 
 const float gravity_accel = -9.8f;
@@ -79,11 +80,11 @@ float density0 = 6378.0f;
 float* density;
 float* lambda;
 
-float bboxDim = 2.0f;
+float bboxDim = 4.0f;
 float epsR = 600.0f;
 
 int cell_size = 1.0f;
-float inv_cell_size = 1.0f;
+float inv_cell_size = 1.0/1.0f;
 
 std::unordered_map<int, std::list<int>> gridHashMap;
 
@@ -126,9 +127,12 @@ void init_fluid()
 
     for (int i = 0; i < num_fluid_particles; i++)
     {
-        float xCoord = fabs((randomFloat() - 0.5f) * bboxDim);
-        float yCoord = fabs((randomFloat() - 0.5f) * bboxDim);
-        float zCoord = fabs((randomFloat() - 0.5f) * bboxDim);
+        // float xCoord = fabs((randomFloat() - 0.5f) * bboxDim);
+        // float yCoord = fabs((randomFloat() - 0.5f) * bboxDim);
+        // float zCoord = fabs((randomFloat() - 0.5f) * bboxDim);
+        float xCoord = randomFloatRange(1.0f, 1.5f);
+        float yCoord = randomFloatRange(1.0f, 1.5f);
+        float zCoord = randomFloatRange(1.0f, 0.5f);
         
         x[i] = glm::vec3(xCoord, yCoord, 0.0f);
         v[i] = glm::vec3(0.0f);
@@ -138,13 +142,11 @@ void init_fluid()
     density = new float[num_fluid_particles];
 }
 
-//TODO:
 std::vector<int> findNeighbors(int pidx)
 {
     int index = spatial_hash(p[pidx]);
   //  printf("finding neighbors for %d in cell %d\n", pidx, index);
-
-    
+  
     //get neighboring gridCells
     std::vector<int> neighboringCells;
     neighboringCells.push_back(index);  
@@ -196,6 +198,8 @@ std::vector<int> findNeighbors(int pidx)
 void predict_sim_step()
 {
     glm::vec3 f_ext = glm::vec3(0.0f, gravity_accel, 0.0f);
+
+    gridHashMap.clear();
 
     //predict v using explicit euler and then damp velocities
     for (int i = 0; i < num_fluid_particles; i++)
@@ -448,7 +452,6 @@ int main(void)
         exit(EXIT_FAILURE);
 
     init_fluid();
-
     GLFWwindow* window;
     GLuint vertex_buffer, vertex_shader, fragment_shader, program;
     GLint mvp_location, vpos_location, vcol_location;
@@ -456,7 +459,7 @@ int main(void)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
  
-    window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Real Time Grass Simulator", NULL, NULL);
+    window = glfwCreateWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "PDB SPH", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
@@ -598,11 +601,18 @@ float verts[] = {
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+        //float time1 = glfwGetTime();
         predict_sim_step();
+        //return 0;
+        //float time2 = glfwGetTime();
+        //printf("predict_sim_step() took %f to complete\n", time2-time1);
         //printf("(%f%f,%f)\n", x[4].x, x[4].y, x[4].z);
         //return 0;
         //genCollisionConstraints();
+        //float time3 = glfwGetTime();
         solve();
+        //float time4 = glfwGetTime();
+        //printf("solve() took %f to complete\n", time4-time3);
 
         glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT, 0.1f, 100.0f);
         glm::mat4 view = camera.GetViewMatrix();
