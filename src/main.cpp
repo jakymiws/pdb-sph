@@ -14,6 +14,15 @@
 #include "LoadShaders.h"
 #include "camera.h"
 
+//TODO: delete reference to this in makefile
+#include "FluidSimulator.h"
+
+//TODO: 
+//1.Move sim to cuda
+//2. Move neighbor finding to cuda
+    //2a. Will need to figure out how to get cuda and opengl to work together - there was a function for it I saw on cuda particles I think
+//3. Test 3D
+
 struct IndirectRenderParams
 {
     GLuint count;
@@ -23,13 +32,6 @@ struct IndirectRenderParams
     GLuint baseInstance;
 };
 
-struct ClothEdge
-{
-    int e1;
-    int e2;
-    float k;
-    float l0;
-};
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
@@ -61,7 +63,7 @@ float qScale = 10.0f;
 int debugSwitch = 0;
 
 //simulation settings and variables
-int num_fluid_particles = 400;
+int num_fluid_particles = 600;
 int maxIterations = 4;
 
 const float gravity_accel = -9.8f;
@@ -116,7 +118,6 @@ void hashParticlePositions()
         int gridCell = spatial_hash(p[i]);
         gridHashMap[gridCell].push_front(i);
     }
-
 }
 
 void init_fluid()
@@ -130,9 +131,9 @@ void init_fluid()
         // float xCoord = fabs((randomFloat() - 0.5f) * bboxDim);
         // float yCoord = fabs((randomFloat() - 0.5f) * bboxDim);
         // float zCoord = fabs((randomFloat() - 0.5f) * bboxDim);
-        float xCoord = randomFloatRange(1.0f, 1.5f);
-        float yCoord = randomFloatRange(1.0f, 1.5f);
-        float zCoord = randomFloatRange(1.0f, 0.5f);
+        float xCoord = randomFloatRange(0.0f, 0.5f);
+        float yCoord = randomFloatRange(0.0f, 0.5f);
+        float zCoord = randomFloatRange(0.0f, 0.5f);
         
         x[i] = glm::vec3(xCoord, yCoord, 0.0f);
         v[i] = glm::vec3(0.0f);
@@ -145,35 +146,24 @@ void init_fluid()
 std::vector<int> findNeighbors(int pidx)
 {
     int index = spatial_hash(p[pidx]);
-  //  printf("finding neighbors for %d in cell %d\n", pidx, index);
   
     //get neighboring gridCells
     std::vector<int> neighboringCells;
     neighboringCells.push_back(index);  
     if (((index + 1) % gridWidth) > (index % gridWidth) && (index+1) < gridWidth*gridWidth)
     {
-        // printf("index+1 = %d \n", index+1);
-        // printf("index+1+gw = %d \n", index+1+gridWidth);
-        // printf("index+1-gw = %d \n", index+1-gridWidth);
-    
         neighboringCells.push_back(index+1);
         neighboringCells.push_back(index+1+gridWidth); neighboringCells.push_back(index+1-gridWidth);
     }
     
     if (((index - 1) % gridWidth) < (index % gridWidth) && (index-1)>=0)
     {
-        // printf("index-1 = %d \n", index-1);
-        // printf("index-1+gw = %d \n", index-1+gridWidth);
-        // printf("index-1-gw = %d \n", index-1-gridWidth);
         neighboringCells.push_back(index-1); 
         neighboringCells.push_back(index-1+gridWidth); neighboringCells.push_back(index-1-gridWidth);
     }
     
     neighboringCells.push_back(index+gridWidth);
     neighboringCells.push_back(index-gridWidth); 
-
-    // printf("index+gw = %d \n", index+gridWidth);
-    // printf("index-gw = %d \n", index-gridWidth);
 
     std::vector<int> neighboringParticles;
     //then append their contents to the neighboring particles vector.
@@ -192,7 +182,6 @@ std::vector<int> findNeighbors(int pidx)
     }
     
     return neighboringParticles;
-
 }
 
 void predict_sim_step()
@@ -205,14 +194,16 @@ void predict_sim_step()
     for (int i = 0; i < num_fluid_particles; i++)
     {
         v[i] = v[i] + dt*f_ext;
-        v[i] *= velo_damp;   
-    }
+        v[i] *= velo_damp;  
 
-    //predict position using explicit euler
-    for (int i = 0; i < num_fluid_particles; i++)
-    {
         p[i] = x[i] + dt*v[i];
     }
+
+    //predict positifindNeighbors(5).size()on using explicit euler
+    // for (int i = 0; i < num_fluid_particles; i++)
+    // {
+    //     p[i] = x[i] + dt*v[i];
+    // }
 
     //update hashtable with predictions
     hashParticlePositions();
@@ -452,6 +443,12 @@ int main(void)
         exit(EXIT_FAILURE);
 
     init_fluid();
+
+    FluidSimulator *fs = new FluidSimulator(4);
+    fs->predictSimStepGPU();
+    delete fs;
+    return 0;
+
     GLFWwindow* window;
     GLuint vertex_buffer, vertex_shader, fragment_shader, program;
     GLint mvp_location, vpos_location, vcol_location;
@@ -572,9 +569,9 @@ float verts[] = {
 
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-
     while (!glfwWindowShouldClose(window))
     {
+
         float currentTime = glfwGetTime();
         deltaTime = currentTime - lastTime;
         numFrames++;
@@ -601,18 +598,18 @@ float verts[] = {
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        //float time1 = glfwGetTime();
+        float time1 = glfwGetTime();
         predict_sim_step();
         //return 0;
-        //float time2 = glfwGetTime();
-        //printf("predict_sim_step() took %f to complete\n", time2-time1);
+        float time2 = glfwGetTime();
+        printf("predict_sim_step() took %f to complete\n", time2-time1);
         //printf("(%f%f,%f)\n", x[4].x, x[4].y, x[4].z);
         //return 0;
         //genCollisionConstraints();
-        //float time3 = glfwGetTime();
+        float time3 = glfwGetTime();
         solve();
-        //float time4 = glfwGetTime();
-        //printf("solve() took %f to complete\n", time4-time3);
+        float time4 = glfwGetTime();
+        printf("solve() took %f to complete\n", time4-time3);
 
         glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT, 0.1f, 100.0f);
         glm::mat4 view = camera.GetViewMatrix();
@@ -669,6 +666,10 @@ float verts[] = {
         glfwPollEvents();
     }
  
+    delete[] x;
+    delete[] v;
+    delete[] p;
+
     glfwDestroyWindow(window);
  
     glfwTerminate();

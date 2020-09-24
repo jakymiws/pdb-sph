@@ -1,9 +1,12 @@
 {
     "C_Cpp.default.includePath": [
         "/usr/include/GL",
-        "/usr/local/include"
+        "/usr/local/include",
+        "/usr/local/cuda/include"
     ],
     "files.associations": {
-        "cmath": "cpp"
+        "cmath": "cpp",
+        "vector": "cpp",
+        "iostream": "cpp"
     }
 }
