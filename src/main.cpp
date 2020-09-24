@@ -85,7 +85,7 @@ float* lambda;
 float bboxDim = 4.0f;
 float epsR = 600.0f;
 
-int cell_size = 1.0f;
+int cell_size = 1;
 float inv_cell_size = 1.0/1.0f;
 
 std::unordered_map<int, std::list<int>> gridHashMap;
@@ -444,11 +444,6 @@ int main(void)
 
     init_fluid();
 
-    FluidSimulator *fs = new FluidSimulator(4);
-    fs->predictSimStepGPU();
-    delete fs;
-    return 0;
-
     GLFWwindow* window;
     GLuint vertex_buffer, vertex_shader, fragment_shader, program;
     GLint mvp_location, vpos_location, vcol_location;
@@ -472,6 +467,28 @@ int main(void)
     glfwSwapInterval(1);
 
     glewInit();
+
+    FluidSimulator *fs = new FluidSimulator(4, cell_size, gridWidth);
+    //while true:
+    // for (int i = 0; i < 3; i++)
+    // {
+    //     fs->stepSimulation(dt);
+    //     printf("i=%d\n", i);
+    //     uint cvbo = fs->getVBO();
+    //     int cn = fs->getNumFluidParticles();
+    //     printf("cvbo = %d\n", cvbo);
+    //     printf("cn = %d\n", cn);
+    // }
+    
+    //     //setVertexBuffer(fs->getBuffer(), fs->getNumParticles());
+    //     //gl display code
+    //     fs->cleanUpSimulation();
+    // delete fs;
+    // glfwDestroyWindow(window);
+ 
+    //glfwTerminate();
+    //exit(EXIT_SUCCESS);
+    //return 0;
 
     glEnable(GL_DEPTH_TEST);
 
@@ -571,7 +588,6 @@ float verts[] = {
     glEnableVertexAttribArray(0);
     while (!glfwWindowShouldClose(window))
     {
-
         float currentTime = glfwGetTime();
         deltaTime = currentTime - lastTime;
         numFrames++;
@@ -598,18 +614,25 @@ float verts[] = {
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        float time1 = glfwGetTime();
-        predict_sim_step();
+        fs->stepSimulation(dt);
+        printf("i=%d\n", numFrames);
+        uint cvbo = fs->getVBO();
+        int cn = fs->getNumFluidParticles();
+        printf("cvbo = %d\n", cvbo);
+        printf("cn = %d\n", cn);
+
+        //float time1 = glfwGetTime();
+        //predict_sim_step();
         //return 0;
-        float time2 = glfwGetTime();
-        printf("predict_sim_step() took %f to complete\n", time2-time1);
+        //float time2 = glfwGetTime();
+        //printf("predict_sim_step() took %f to complete\n", time2-time1);
         //printf("(%f%f,%f)\n", x[4].x, x[4].y, x[4].z);
         //return 0;
         //genCollisionConstraints();
-        float time3 = glfwGetTime();
-        solve();
-        float time4 = glfwGetTime();
-        printf("solve() took %f to complete\n", time4-time3);
+        //float time3 = glfwGetTime();
+        //solve();
+        //float time4 = glfwGetTime();
+        //printf("solve() took %f to complete\n", time4-time3);
 
         glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT, 0.1f, 100.0f);
         glm::mat4 view = camera.GetViewMatrix();
@@ -619,47 +642,54 @@ float verts[] = {
 
         glUniformMatrix4fv(glGetUniformLocation(light_shader_program, "projection"), 1, GL_FALSE, &projection[0][0]);
         glUniformMatrix4fv(glGetUniformLocation(light_shader_program, "view"), 1, GL_FALSE, &view[0][0]);
+
+        glBindBuffer(GL_ARRAY_BUFFER, cvbo);
+        glVertexPointer(4, GL_FLOAT, 0, 0);
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glDrawArrays(GL_POINTS, 0, cn);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glDisableClientState(GL_VERTEX_ARRAY);
         
-        glBindVertexArray(lightVAO);
+        // glBindVertexArray(lightVAO);
         
-        for (int i = 0; i < num_fluid_particles; i++)
-        {
-            glm::mat4 model = glm::mat4(1.0f);
-            model = glm::mat4(1.0f);
-            //model = glm::translate(model, lightPos + glm::vec3(i,0,0));
-            model = glm::translate(model, x[i]);
-            model = glm::scale(model, glm::vec3(0.01f));
-            if (i == 15)
-            {
-                //model = glm::rotate(model, glm::radians(-55.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-                glUniform1f(glGetUniformLocation(light_shader_program, "inCol"), 1.0f);
+        // for (int i = 0; i < num_fluid_particles; i++)
+        // {
+        //     glm::mat4 model = glm::mat4(1.0f);
+        //     model = glm::mat4(1.0f);
+        //     //model = glm::translate(model, lightPos + glm::vec3(i,0,0));
+        //     model = glm::translate(model, x[i]);
+        //     model = glm::scale(model, glm::vec3(0.01f));
+        //     if (i == 15)
+        //     {
+        //         //model = glm::rotate(model, glm::radians(-55.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        //         glUniform1f(glGetUniformLocation(light_shader_program, "inCol"), 1.0f);
 
-            } else {
-                glUniform1f(glGetUniformLocation(light_shader_program, "inCol"), 0.5f);
-            }
+        //     } else {
+        //         glUniform1f(glGetUniformLocation(light_shader_program, "inCol"), 0.5f);
+        //     }
 
-            glUniformMatrix4fv(glGetUniformLocation(light_shader_program, "model"), 1, GL_FALSE, &model[0][0]);
+        //     glUniformMatrix4fv(glGetUniformLocation(light_shader_program, "model"), 1, GL_FALSE, &model[0][0]);
 
-            glDrawArrays(GL_TRIANGLES, 0, 36);
-        }
+        //     glDrawArrays(GL_TRIANGLES, 0, 36);
+        // }
        
         //End Display light cube
 
         // //Display ground plane
-        // glUseProgram(ground_shader_program);
+        glUseProgram(ground_shader_program);
 
-        // glUniformMatrix4fv(glGetUniformLocation(ground_shader_program, "projection"), 1, GL_FALSE, &projection[0][0]);
-        // glUniformMatrix4fv(glGetUniformLocation(ground_shader_program, "view"), 1, GL_FALSE, &view[0][0]);
+        glUniformMatrix4fv(glGetUniformLocation(ground_shader_program, "projection"), 1, GL_FALSE, &projection[0][0]);
+        glUniformMatrix4fv(glGetUniformLocation(ground_shader_program, "view"), 1, GL_FALSE, &view[0][0]);
         
-        // glm::mat4 model = glm::mat4(1.0f);
-        // //model = glm::translate(model, glm::vec3(xTrans, 0, zTrans));
-        // model = glm::scale(model, glm::vec3(qScale));
-        // model = glm::rotate(model, 1.5708f, glm::vec3(1,0,0)); //1.5708 radians = 90 degrees
+        glm::mat4 model = glm::mat4(1.0f);
+        //model = glm::translate(model, glm::vec3(xTrans, 0, zTrans));
+        model = glm::scale(model, glm::vec3(qScale));
+        model = glm::rotate(model, 1.5708f, glm::vec3(1,0,0)); //1.5708 radians = 90 degrees
 
-        // glUniformMatrix4fv(glGetUniformLocation(ground_shader_program, "model"), 1, GL_FALSE, &model[0][0]);
+        glUniformMatrix4fv(glGetUniformLocation(ground_shader_program, "model"), 1, GL_FALSE, &model[0][0]);
 
-        // glBindVertexArray(groundVAO);
-        // glDrawArrays(GL_QUADS, 0, 4);
+        glBindVertexArray(groundVAO);
+        glDrawArrays(GL_QUADS, 0, 4);
         //End Display ground plane
 
         glfwSwapBuffers(window);
@@ -669,6 +699,11 @@ float verts[] = {
     delete[] x;
     delete[] v;
     delete[] p;
+    delete[] lambda;
+    delete[] density;
+
+    fs->cleanUpSimulation();
+    delete fs;
 
     glfwDestroyWindow(window);
  

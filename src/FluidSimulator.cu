@@ -1,18 +1,101 @@
+#include <glew.h>
 #include "FluidSimulator.h"
 
 #include "common.h"
 
-FluidSimulator::FluidSimulator(int n)
+FluidSimulator::FluidSimulator(int n, int _cellSize, int _gridWidth)
 {
     num_fluid_particles = n;
 
-    x = new float4[num_fluid_particles]; 
-    p = new float4[num_fluid_particles]; 
-    v = new float4[num_fluid_particles];
+    gridWidth = _gridWidth;
+    gridSize = gridWidth*gridWidth;
+
+    cellSize = _cellSize;
+    invCellSize = 1.0f/cellSize;
+
+    x = new float[num_fluid_particles*4]; 
+    p = new float[num_fluid_particles*4]; 
+    v = new float[num_fluid_particles*4];
 
     RandomPositionStart();
 
-    printf("New fluid simulator with %d particles\n", num_fluid_particles);
+    AllocCudaArrays();
+
+    printf("New fluid simulator with %d particles, cellSize %d, invCellSize %f, gridWidth %d, gridSize %d\n", 
+            num_fluid_particles, cellSize, invCellSize, gridWidth, gridSize);
+
+    InitGL();
+    printf("openGL initialized in fs with glVBO = %d\n", glVBO);
+}
+
+void FluidSimulator::AllocCudaArrays()
+{
+    cudaMalloc((void**)&dev_v, num_fluid_particles*4*sizeof(float));
+    checkCUDAError("malloc dev_v failed");
+    cudaMalloc((void**)&dev_p, num_fluid_particles*4*sizeof(float));
+    checkCUDAError("malloc dev_p failed");
+    cudaMalloc((void**)&dev_x, num_fluid_particles*4*sizeof(float));
+    checkCUDAError("malloc dev_x failed");
+
+    cudaMemcpy(dev_v, v, num_fluid_particles*4*sizeof(float), cudaMemcpyHostToDevice);
+    checkCUDAError("memcpy v-->dev_v failed");
+
+    cudaMemcpy(dev_x, x, num_fluid_particles*4*sizeof(float), cudaMemcpyHostToDevice);
+    checkCUDAError("memcpy x-->dev_x failed");
+
+    cudaMalloc((void**)&dev_cellIds, num_fluid_particles*sizeof(uint));
+    checkCUDAError("malloc failed");
+    cudaMalloc((void**)&dev_particleIds, num_fluid_particles*sizeof(uint));
+    checkCUDAError("malloc failed");
+    cudaMalloc((void**)&dev_cellStarts, gridSize*sizeof(uint));
+    checkCUDAError("malloc failed");
+}
+
+void registerVBO_WithCUDA(const uint vbo, struct cudaGraphicsResource **cudaVBO_resource)
+{
+    cudaGraphicsGLRegisterBuffer(cudaVBO_resource, vbo, cudaGraphicsMapFlagsNone);
+    checkCUDAError("register vbo failed");
+}
+
+void unregisterVBO_WithCUDA(struct cudaGraphicsResource *cudaVBO_resource)
+{
+    cudaGraphicsUnregisterResource(cudaVBO_resource);
+    checkCUDAError("unregister buffer failed");
+}
+
+void *mapGL(struct cudaGraphicsResource **cuda_resource)
+{
+    void *ptr;
+    cudaGraphicsMapResources(1, cuda_resource, 0);
+    checkCUDAError("map error");
+    size_t num_bytes;
+    cudaGraphicsResourceGetMappedPointer((void **)&ptr, &num_bytes, *cuda_resource);
+    checkCUDAError("map error");
+    return ptr;
+}
+
+void unmapGL(struct cudaGraphicsResource *cuda_resource)
+{
+    cudaGraphicsUnmapResources(1, &cuda_resource, 0);
+    checkCUDAError("unmap error");
+}
+
+void FluidSimulator::InitGL()
+{
+    //create GL VBO and store in global var.
+    glGenVertexArrays(1, &glVAO);
+    glGenBuffers(1, &glVBO);
+
+    glBindVertexArray(glVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, glVBO);
+    glBufferData(GL_ARRAY_BUFFER, num_fluid_particles*4*sizeof(float), x, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    //glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
+    //glEnableVertexAttribArray(0);
+    
+    //register VBO With Cuda
+    registerVBO_WithCUDA(glVBO, &cudaVBO_resource);
+
 }
 
 void FluidSimulator::RandomPositionStart()
@@ -23,28 +106,25 @@ void FluidSimulator::RandomPositionStart()
         float yCoord = randomFloatRangef(0.0f, 0.5f);
         //float zCoord = randomFloatRange(0.0f, 0.5f);
 
-        x[i] = make_float4(xCoord, yCoord, 0.0f, 0.0f);
-        v[i] = make_float4(0.0f,0.0f,0.0f,0.0f);
+        x[i*4] = xCoord; x[i*4+1] = yCoord; x[i*4+2] = 0.0f; x[i*4+3] = 0.0f;
+        v[i*4] = 0.0f;   v[i*4+1] = 0.0f;   v[i*4+2] = 0.0f; v[i*4+3] = 0.0f;
+
     }
 }
 
-__global__ void computeSpatialHash(const int n, const float inv_cell_size, const int gridWidth, const float4* ip, uint *oCellIds, uint *oParticleIds)
+__global__ void computeSpatialHash(const int n, const float inv_cell_size, const int gridWidth, const float* ip, uint *oCellIds, uint *oParticleIds)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
     {
         return;
     }
-    //(int)pos.x*inv_cell_size + ((int)pos.y*inv_cell_size)*gridWidth;
 
-    float4 p_i = ip[index];
     //hash position
-    int cellId = p_i.x*inv_cell_size + p_i.y*inv_cell_size*gridWidth;
+    int cellId = ip[index*4]*inv_cell_size + ip[index*4+1]*inv_cell_size*gridWidth;
     
-    //ohashes[index] = make_uint2(cellId, index);
     oCellIds[index] = cellId;
     oParticleIds[index] = index;
-
 }
 
 void thrustRadixSort(const int n, uint *ioCellIds, uint *ioParticleIds)
@@ -63,7 +143,7 @@ __global__ void findCellsInArray(const int n, const uint* iCellIds, uint* cellSt
     //the first cell in the array starts at the 0th position.
     if (index == 0)
     {
-        cellStarts[ihashes[0].x] = 0;
+        cellStarts[iCellIds[index]] = 0;
         return;
     }
     //if neighboring cellIds in the ihashes array (which is sorted by cellId) are different
@@ -74,7 +154,7 @@ __global__ void findCellsInArray(const int n, const uint* iCellIds, uint* cellSt
     }
 }
 
-__global__ void explictEuler(int n, const float dt, const float4* ix, float4 *ov, float4* op)
+__global__ void explictEuler(int n, const float dt, const float* ix, float* ov, float* op)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
@@ -82,146 +162,121 @@ __global__ void explictEuler(int n, const float dt, const float4* ix, float4 *ov
         return;
     }
 
-    float velo_damp = 0.99f;
+    //float velo_damp = 0.99f;
     float g = -9.8f;
-    float4 f_ext = make_float4(0.0f, g, 0.0f, 0.0f);
+    float f_ext_x = 0.0f;
+    float f_ext_y = g;
+    float f_ext_z = 0.0f;
 
-    float4 v_i = ov[index];
-    float4 x_i = ix[index];
+    ov[index*4]   = ov[index*4]   + dt*f_ext_x;
+    ov[index*4+1] = ov[index*4+1] + dt*f_ext_y;
+    ov[index*4+2] = ov[index*4+2] + dt*f_ext_z;
 
-    v_i = make_float4(v_i.x + dt*f_ext.x, 
-                         v_i.y + dt*f_ext.y, 
-                         v_i.z + dt*f_ext.z, 
-                         v_i.w + dt*f_ext.w);
-
-    v_i = make_float4(v_i.x*velo_damp, v_i.y*velo_damp, v_i.z*velo_damp, v_i.w*velo_damp);
-    ov[index] = v_i;
-
-    op[index] = make_float4(x_i.x + dt*v_i.x,
-                            x_i.y + dt*v_i.y, 
-                            x_i.z + dt*v_i.z, 
-                            x_i.w + dt*v_i.w);
+    op[index*4]   = ix[index*4]   + dt*ov[index*4];
+    op[index*4+1] = ix[index*4+1] + dt*ov[index*4+1];
+    op[index*4+2] = ix[index*4+2] + dt*ov[index*4+2];
 
 }
 
-void FluidSimulator::predictSimStepGPU()
+void FluidSimulator::stepSimulation(const float dt)
 {
-    float dt = 0.0086f;
+    //float dt = 0.0086f;
+    //dev_x = glMap() somehow? I don't understand this bit.
 
-    spatialHashMap.clear();
+    //predict using explicit euler
+    // float *dev_v;
+    // float *dev_p;
+    // float *dev_x;
 
-    float4 *dev_v;
-    float4 *dev_p;
-    float4 *dev_x;
+    dev_x = (float*) mapGL(&cudaVBO_resource);
 
-    uint2* particleHashes; //cudamalloc
+    // cudaMalloc((void**)&dev_v, num_fluid_particles*4*sizeof(float));
+    // checkCUDAError("malloc dev_v failed");
+    // cudaMalloc((void**)&dev_p, num_fluid_particles*4*sizeof(float));
+    // checkCUDAError("malloc dev_p failed");
+    // cudaMalloc((void**)&dev_x, num_fluid_particles*4*sizeof(float));
+    // checkCUDAError("malloc dev_x failed");
 
+    // cudaMemcpy(dev_v, v, num_fluid_particles*4*sizeof(float), cudaMemcpyHostToDevice);
+    // checkCUDAError("memcpy v-->dev_v failed");
 
-    cudaMalloc((void**)&dev_v, num_fluid_particles*sizeof(float4));
-    checkCUDAError("malloc dev_v failed");
-    cudaMalloc((void**)&dev_p, num_fluid_particles*sizeof(float4));
-    checkCUDAError("malloc dev_p failed");
-    cudaMalloc((void**)&dev_x, num_fluid_particles*sizeof(float4));
-    checkCUDAError("malloc dev_x failed");
-
-    //copy velocities and positions (x) to device.
-    cudaMemcpy(dev_v, v, num_fluid_particles*sizeof(float4), cudaMemcpyHostToDevice);
-    checkCUDAError("memcpy v-->dev_v failed");
-
-    cudaMemcpy(dev_x, x, num_fluid_particles*sizeof(float4), cudaMemcpyHostToDevice);
-    checkCUDAError("memcpy x-->dev_x failed");
+    // cudaMemcpy(dev_x, x, num_fluid_particles*4*sizeof(float), cudaMemcpyHostToDevice);
+    // checkCUDAError("memcpy x-->dev_x failed");
 
     int numThreads = 256;
     dim3 threadsPerBlock(numThreads);
     dim3 blocksPerGrid((num_fluid_particles+numThreads-1)/numThreads);
 
-    //call explict euler. Modifies dev_v and dev_p
+    //call explict euler per particle. Modifies dev_v and dev_p
     explictEuler<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dt, dev_x, dev_v, dev_p);
     checkCUDAError("explicit euler failed");
-
-//__global__ void computeSpatialHash(const int n, const float inv_cell_size, const int gridWidth, const float4* ip, uint *oCellIds, uint *oParticleIds)
-    computeSpatialHash<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, 1.0f, 2, dev_p, );
-
-
-    cudaMemcpy(p, dev_p, num_fluid_particles*sizeof(float4), cudaMemcpyDeviceToHost);
-    cudaMemcpy(v, dev_v, num_fluid_particles*sizeof(float4), cudaMemcpyDeviceToHost);
-
-    // for (int i = 0; i < num_fluid_particles; i++)
-    // {
-    //     printf("p[%d] = (%f,%f,%f,%f)\n", i, p[i].x, p[i].y, p[i].z, p[i].w);
-    // }
-    // for (int i = 0; i < num_fluid_particles; i++)
-    // {
-    //     printf("v[%d] = (%f,%f,%f,%f)\n", i, v[i].x, v[i].y, v[i].z, v[i].w);
-
-    // }
-
     
+    //rehash each step
+    // uint *dev_cellIds;
+    // uint *dev_particleIds;
+    // uint *dev_cellStarts;
 
-    //computeSpatialHash
-    //fast radix sort
-    //findCellStart
-
-    //also a good idea to sort the position/velocity arrays by particleId? GridId somehow?
-}
-
-void test()
-{
-    // int n = 10;
-
-    // int *dev_odata;
-    // int *odata = new int[n];
-    // int *idata = new int[n];
-
-    // for (int i = 0; i < n; i++)
-    // {
-    //     idata[i] = 0;
-    //     odata[i] = 0;
-    //     printf("pre odata[%d] = %d\n", i , odata[i]);
-    // }
-
-
-    // cudaMalloc((void**)&dev_odata, n*sizeof(int));
+    // cudaMalloc((void**)&dev_cellIds, num_fluid_particles*sizeof(uint));
+    // checkCUDAError("malloc failed");
+    // cudaMalloc((void**)&dev_particleIds, num_fluid_particles*sizeof(uint));
+    // checkCUDAError("malloc failed");
+    // cudaMalloc((void**)&dev_cellStarts, gridSize*sizeof(uint));//should actually be the number of cells - will need to calc this
     // checkCUDAError("malloc failed");
 
-    // cudaMemcpy(dev_odata, idata, n*sizeof(int), cudaMemcpyHostToDevice);
+    //compute spatial hashes per particle. Modifies dev_CellIds and dev_particleIds
+    computeSpatialHash<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, invCellSize, gridWidth, dev_p, dev_cellIds, dev_particleIds);
+    checkCUDAError("computeSpatialHash failed");
+    //sort by cellId
+    thrustRadixSort(num_fluid_particles, dev_cellIds, dev_particleIds);
+    checkCUDAError("thrust error");
+    //get starting index of each cellId in the cellIds and particleIds parallel arrays and store in dev_cellStarts.
+    findCellsInArray<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dev_cellIds, dev_cellStarts);
+    checkCUDAError("findCellsInArray failed");
+
+    // uint* cellIds = new uint[num_fluid_particles];
+    // uint* particleIds = new uint[num_fluid_particles];
+    // uint* cellStarts = new uint[gridSize];
+    
+    // cudaMemcpy(cellIds, dev_cellIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
+    // checkCUDAError("memcpy failed");
+    // cudaMemcpy(particleIds, dev_particleIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
+    // checkCUDAError("memcpy failed");
+    // cudaMemcpy(cellStarts, dev_cellStarts, gridSize*sizeof(uint), cudaMemcpyDeviceToHost);
     // checkCUDAError("memcpy failed");
 
-    // int numThreads = 256;
-    // dim3 threadsPerBlock(numThreads);
-    // dim3 blocksPerGrid((n+numThreads-1)/numThreads);
-    
-    // //explictEuler<<<blocksPerGrid, threadsPerBlock>>>(n, dev_odata);
-    // checkCUDAError("explicitEuler failed");
-
-    // cudaMemcpy(odata, dev_odata, n*sizeof(int), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(p, dev_p, num_fluid_particles*4*sizeof(float), cudaMemcpyDeviceToHost);
     // checkCUDAError("memcpy failed");
-    
-    // for (int i = 0; i < n; i++)
+    // cudaMemcpy(v, dev_v, num_fluid_particles*4*sizeof(float), cudaMemcpyDeviceToHost);
+    // checkCUDAError("memcpy failed");
+
+    // for (int i = 0; i < num_fluid_particles; i++)
     // {
-    //     printf("post cuda odata[%d] = %d\n", i , odata[i]);
+    //     printf("p[%d] = (%f,%f,%f,%f)\n", i, p[i*4], p[i*4+1], p[i*4+2], p[i*4+3]);
+    // }
+    // for (int i = 0; i < num_fluid_particles; i++)
+    // {
+    //     printf("v[%d] = (%f,%f,%f,%f)\n", i, v[i*4], v[i*4+1], v[i*4+2], v[i*4+3]);
     // }
 
-    // cudaFree(dev_odata);
-}
+    // for (int i = 0; i < num_fluid_particles; i++)
+    // {
+    //     printf("cellIds[%d] = %d, particleIds[%d] = %d, cellStarts[%d] = %d\n", i, cellIds[i], i, particleIds[i], cellIds[i], cellStarts[cellIds[i]]);
+    // }
+    // for (int i = 0; i < gridSize; i++)
+    // {
+    //     printf("cellStarts[%d] = %d\n", i, cellStarts[i]);
+    // }
 
-int FluidSimulator::spatial_hash(const float x, const float y, const float z)
-{
-    return (int)x*inv_cell_size + ((int)y*inv_cell_size)*gridWidth;
-}
+    //solve
 
-void FluidSimulator::hashParticlePositions()
-{
-    //generate grid from scratch. Use a loose grid where each particle can only be in one cell and store these 
-    //cell ids in an int array parallel to the state var ones.p
-    for (int i = 0; i < num_fluid_particles; i++)
-    {
-        //I think it should be p[i] and not x[i] since I'm only calling this at the moment after the predict step.
-        int gridCell = spatial_hash(p[i].x, p[i].y, p[i].z);
-        spatialHashMap[gridCell].push_front(i);//push back the index of the xcoord.
-    }
-}
+    //unmap(cuda vbo resource);
 
+    unmapGL(cudaVBO_resource);
+
+    //move these to a cleanup function
+    
+
+}
 
 float FluidSimulator::randomFloatf()
 {
@@ -234,4 +289,17 @@ float FluidSimulator::randomFloatRangef(float a, float b)
     float diff = b-a;
     float r = f*diff;
     return a+r;
+}
+
+uint FluidSimulator::getVBO(){ return glVBO; }
+int FluidSimulator::getNumFluidParticles(){ return num_fluid_particles; }
+
+void FluidSimulator::cleanUpSimulation()
+{
+    cudaFree(dev_p);
+    cudaFree(dev_x);
+    cudaFree(dev_v);
+    cudaFree(dev_cellIds);
+    cudaFree(dev_particleIds);
+    cudaFree(dev_cellStarts);
 }
