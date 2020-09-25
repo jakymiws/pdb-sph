@@ -27,10 +27,19 @@ private:
     float *dev_v;
     float *dev_p;
     //float *dev_x;
+    float *dev_density;
+    float *dev_lambda;
 
     uint *dev_cellIds;
     uint *dev_particleIds;
     uint *dev_cellStarts;
+    uint *dev_cellEnds;
+
+    float h;
+    float rho0;
+    float epsR;
+
+    int maxIterations;
 
     //hashing
     int cellSize;

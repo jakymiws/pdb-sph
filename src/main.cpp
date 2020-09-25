@@ -86,7 +86,7 @@ float bboxDim = 4.0f;
 float epsR = 600.0f;
 
 int cell_size = 1;
-float inv_cell_size = 1.0/1.0f;
+float inv_cell_size = 1.0f/1.0f;
 
 std::unordered_map<int, std::list<int>> gridHashMap;
 
@@ -619,6 +619,7 @@ float verts[] = {
         //printf("i=%d\n", numFrames);
         uint cvbo = fs->getVBO();
         int cn = fs->getNumFluidParticles();
+        //return 0;
         //printf("cvbo = %d\n", cvbo);
         //printf("cn = %d\n", cn);
 
