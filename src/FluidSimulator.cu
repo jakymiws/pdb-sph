@@ -8,7 +8,7 @@ FluidSimulator::FluidSimulator(int n, int _cellSize, int _gridWidth)
     num_fluid_particles = n;
 
     gridWidth = _gridWidth;
-    gridSize = gridWidth*gridWidth;
+    gridSize = gridWidth*gridWidth*gridWidth;
 
     cellSize = _cellSize;
     invCellSize = 1.0f/cellSize;
@@ -123,38 +123,45 @@ void FluidSimulator::RandomPositionStart()
     {
         float xCoord = randomFloatRangef(0.0f, 0.5f);
         float yCoord = randomFloatRangef(0.0f, 0.5f);
-        //float zCoord = randomFloatRange(0.0f, 0.5f);
+        float zCoord = randomFloatRangef(0.0f, 0.5f);
 
-        x[i*4] = xCoord; x[i*4+1] = yCoord; x[i*4+2] = 0.0f; x[i*4+3] = 0.0f;
+        x[i*4] = xCoord; x[i*4+1] = yCoord; x[i*4+2] = zCoord; x[i*4+3] = 0.0f;
         v[i*4] = 0.0f;   v[i*4+1] = 0.0f;   v[i*4+2] = 0.0f; v[i*4+3] = 0.0f;
 
     }
 }
 
-__device__ int getCellNeighbors(const int cell, const int gridWidth, int *oCellNeighbors)
+__device__ int getCellNeighbors_2d(const int cell, const int gridWidth, int *oCellNeighbors)
 {
     int num_neighbors_found = 0;
     //neighboringCells.push_back(cell);  
     oCellNeighbors[num_neighbors_found] = cell;
     num_neighbors_found++;
-    if (((cell + 1) % gridWidth) > (cell % gridWidth) && (cell+1) < gridWidth*gridWidth)
+    int factor = cell/(gridWidth*gridWidth);
+    int gridUpperBound = gridWidth*gridWidth + factor*(gridWidth*gridWidth);
+    int gridLowerBound = factor*(gridWidth*gridWidth);
+
+    //printf("factor = %d/%d = %d\n", cell, gridWidth*gridWidth, factor);
+    //printf("gub = %d\n", gridUpperBound);
+
+    if (((cell + 1) % gridWidth) > (cell % gridWidth) && (cell+1) < gridUpperBound)
     {
         //neighboringCells.push_back(cell+1);
         oCellNeighbors[num_neighbors_found] = cell+1;
         num_neighbors_found++;
-        //printf("ocn[%d] = %d\n", num_neighbors_found, cell+1);
-        if (cell+1+gridWidth < gridWidth*gridWidth)
+        //printf("ocn1[%d] = %d\n", num_neighbors_found, cell+1);
+        if (cell+1+gridWidth < gridUpperBound)
         {
             oCellNeighbors[num_neighbors_found] = cell+1+gridWidth;
             num_neighbors_found++;
         }
-        if (cell+1-gridWidth > 0)
+        if (cell+1-gridWidth >= gridLowerBound)
         {
             oCellNeighbors[num_neighbors_found] = cell+1-gridWidth;
             num_neighbors_found++;
 
         }
-        //printf("ocn[%d] = %d\n", num_neighbors_found, cell+1-gridWidth);
+       // printf("ocn2[%d] = %d\n", num_neighbors_found, cell+1-gridWidth);
 
         //neighboringCells.push_back(cell+1+gridWidth); neighboringCells.push_back(cell+1-gridWidth);
        // num_neighbors_found +=3;
@@ -167,20 +174,20 @@ __device__ int getCellNeighbors(const int cell, const int gridWidth, int *oCellN
         //neighboringCells.push_back(cell-1); 
         oCellNeighbors[num_neighbors_found] = cell-1;
         num_neighbors_found++;
-        //printf("ocn[%d] = %d\n", num_neighbors_found, cell-1);
-        if (cell-1+gridWidth < gridWidth*gridWidth)
+       // printf("ocn3[%d] = %d\n", num_neighbors_found, cell-1);
+        if (cell-1+gridWidth < gridUpperBound)
         {
             oCellNeighbors[num_neighbors_found] = cell-1+gridWidth;
             num_neighbors_found++;
         }
 
-        if (cell-1-gridWidth > 0)
+        if (cell-1-gridWidth >= gridLowerBound)
         {
             oCellNeighbors[num_neighbors_found] = cell-1-gridWidth;
             num_neighbors_found++;
         }
-        //printf("ocn[%d] = %d\n", num_neighbors_found, cell-1+gridWidth);
-        //printf("ocn[%d] = %d\n", num_neighbors_found, cell-1-gridWidth);
+        //printf("ocn4[%d] = %d\n", num_neighbors_found, cell-1+gridWidth);
+        //printf("ocn5[%d] = %d\n", num_neighbors_found, cell-1-gridWidth);
 
         //neighboringCells.push_back(cell-1+gridWidth); neighboringCells.push_back(cell-1-gridWidth);
         //printf("nnf = %d\n", num_neighbors_found);
@@ -189,13 +196,13 @@ __device__ int getCellNeighbors(const int cell, const int gridWidth, int *oCellN
     
     //neighboringCells.push_back(cell+gridWidth);
     //neighboringCells.push_back(cell-gridWidth);
-    if (cell+gridWidth < gridWidth*gridWidth)
+    if (cell+gridWidth < gridUpperBound)
     {  
         oCellNeighbors[num_neighbors_found] = cell+gridWidth;
         num_neighbors_found++;
     } 
 
-    if (cell-gridWidth > 0)
+    if (cell-gridWidth >= gridLowerBound)
     {
         oCellNeighbors[num_neighbors_found] = cell-gridWidth;
         num_neighbors_found++;
@@ -204,6 +211,61 @@ __device__ int getCellNeighbors(const int cell, const int gridWidth, int *oCellN
     return num_neighbors_found;
 }
 
+__device__ int getCellNeighbors_3d(const int cell, const int gridWidth, const int gridSize, int *oCellNeighbors)
+{
+    //printf("looking for the 3d neighbors of cell %d\n", cell);
+    int neighbors1[9];
+    int neighbors2[9];
+    int neighbors3[9];
+
+    for (int i = 0; i < 9; i++)
+    {
+        neighbors1[i] = 0;
+        neighbors2[i] = 0;
+        neighbors3[i] = 0;
+    }
+
+    int num_neighbors1 = getCellNeighbors_2d(cell, gridWidth, neighbors1);
+    for (int i = 0; i < num_neighbors1; i++)
+    {
+        oCellNeighbors[i] = neighbors1[i];
+    }
+    int num_neighbors2 = 0;
+    int num_neighbors3 = 0;
+    if ((cell + gridWidth*gridWidth) < gridSize)
+    {
+        num_neighbors2 = getCellNeighbors_2d(cell+gridWidth*gridWidth, gridWidth, neighbors2);
+        for (int i = 0; i < 9; i++)
+        {
+            oCellNeighbors[num_neighbors1+i] = neighbors2[i];
+        }
+    }
+
+    if ((cell - gridWidth*gridWidth) >= 0)
+    {
+        num_neighbors3 = getCellNeighbors_2d(cell-gridWidth*gridWidth, gridWidth, neighbors3);
+        for (int i = 0; i < 9; i++)
+        {
+            oCellNeighbors[num_neighbors1+num_neighbors2+i] = neighbors3[i];
+        }
+    }
+
+    // for (int i = 0; i < 9; i++)
+    // {
+    //     printf("n1[%d] = %d\n", i, neighbors1[i]);
+    // }
+    // for (int i = 0; i < 9; i++)
+    // {
+    //     printf("n2[%d] = %d\n", i, neighbors2[i]);
+    // } 
+    // for (int i = 0; i < 9; i++)
+    // {
+    //     printf("n3[%d] = %d\n", i, neighbors3[i]);
+    // }
+
+    return num_neighbors1 + num_neighbors2 + num_neighbors3;
+
+}
 
 
 __global__ void computeSpatialHash(const int n, const float inv_cell_size, const int gridWidth, const float* ip, uint *oCellIds, uint *oParticleIds)
@@ -213,9 +275,8 @@ __global__ void computeSpatialHash(const int n, const float inv_cell_size, const
     {
         return;
     }
-
     //hash position
-    int cellId = (int)ip[index*4]*inv_cell_size + ((int)ip[index*4+1]*inv_cell_size)*gridWidth;
+    int cellId = (int)ip[index*4]*inv_cell_size + ((int)ip[index*4+1]*inv_cell_size)*gridWidth + ((int)ip[index*4+2]*inv_cell_size)*gridWidth*gridWidth;
     
     oCellIds[index] = abs(cellId);
     oParticleIds[index] = index;
@@ -303,13 +364,15 @@ __global__ void computeDensity(int n, float h, int gridWidth, const float* ip, c
     int particleId = particleIds[index];
     int cell = cellIds[index];
 
-    int neighboringCells[9];
-    for (int i = 0; i < 9; i++)
+    int gs = gridWidth*gridWidth*gridWidth;
+
+    int neighboringCells[27];
+    for (int i = 0; i < 27; i++)
     {
         neighboringCells[i] = 0;
     }
 
-    int num_neighbors_found = getCellNeighbors(cell, gridWidth, neighboringCells);
+    int num_neighbors_found = getCellNeighbors_3d(cell,  gridWidth, gs, neighboringCells);
 
     float rho = 0.0f;
     for (int k = 0; k < num_neighbors_found; k++)
@@ -365,16 +428,18 @@ __global__ void computeLambda(int n, float h, int gridWidth, float rho0, float e
     float _pi = 3.141592f;
     int particleId = particleIds[index];
     int cell = cellIds[index];
+    int gs = gridWidth*gridWidth*gridWidth;
+
 
     float C_i = (idensity[particleId]/rho0) - 1.0f;
 
-    int neighboringCells[9];
-    for (int i = 0; i < 9; i++)
+    int neighboringCells[27];
+    for (int i = 0; i < 27; i++)
     {
         neighboringCells[i] = 0;
     }
 
-    int num_neighbors_found = getCellNeighbors(cell, gridWidth, neighboringCells);
+    int num_neighbors_found = getCellNeighbors_3d(cell, gridWidth, gs, neighboringCells);
 
     float sum_grad_C_i = 0.0f;
     for (int k = 0; k < num_neighbors_found; k++)
@@ -437,14 +502,17 @@ __global__ void projectDensityConstraint(int n, float h, int gridWidth, float rh
     int particleId = particleIds[index];
     int cell = cellIds[index];
 
-    int neighboringCells[9];
+    int gs = gridWidth*gridWidth*gridWidth;
 
-    for (int i = 0; i < 9; i++)
+
+    int neighboringCells[27];
+
+    for (int i = 0; i < 27; i++)
     {
         neighboringCells[i] = 0;
     }
 
-    int num_neighbors_found = getCellNeighbors(cell, gridWidth, neighboringCells);
+    int num_neighbors_found = getCellNeighbors_3d(cell, gridWidth, gs, neighboringCells);
 
     float constraint_sum_x = 0.0f; float constraint_sum_y = 0.0f; float constraint_sum_z = 0.0f;  
     for (int k = 0; k < num_neighbors_found; k++)
@@ -536,15 +604,15 @@ void FluidSimulator::stepSimulation(const float dt)
     explictEuler<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dt, dev_x, dev_v, dev_p);
     checkCUDAError("explicit euler failed");
 
-    //compute spatial hashes per particle. Modifies dev_CellIds and dev_particleIds
+    // //compute spatial hashes per particle. Modifies dev_CellIds and dev_particleIds
     computeSpatialHash<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, invCellSize, gridWidth, dev_p, dev_cellIds, dev_particleIds);
     checkCUDAError("computeSpatialHash failed");
 
-    //sort by cellId
+    // //sort by cellId
     thrustRadixSort(num_fluid_particles, dev_cellIds, dev_particleIds);
     checkCUDAError("thrust error");
 
-    //get starting index of each cellId in the cellIds and particleIds parallel arrays and store in dev_cellStarts.
+    // //get starting index of each cellId in the cellIds and particleIds parallel arrays and store in dev_cellStarts.
     findCellsInArray<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, gridWidth, dev_cellIds, dev_cellStarts, dev_cellEnds);
     checkCUDAError("findCellsInArray failed");
 
@@ -577,6 +645,18 @@ void FluidSimulator::stepSimulation(const float dt)
         cudaDeviceSynchronize();
         num_iterations++;
     }
+//int getCellNeighbors_3d(const int cell, const int gridWidth, const int gridSize, int *oCellNeighbors)
+    // int cn[27];
+    // for (int i = 0; i < 27; i++)
+    // {
+    //     cn[i] = 0;
+    // }
+    // int nn = getCellNeighbors_3d(3, gridWidth, gridSize, cn);
+    // printf("nn = %d\n", nn);
+    // for (int i = 0; i < 27; i++)
+    // {
+    //     printf("cn[%d] = %d\n", i, cn[i]);
+    // }
 
     // float *hrho = new float[num_fluid_particles];
     // cudaMemcpy(hrho, dev_density, num_fluid_particles*sizeof(float), cudaMemcpyDeviceToHost);
@@ -586,7 +666,6 @@ void FluidSimulator::stepSimulation(const float dt)
     // {
     //     printf("rho[%d] = %f\n", i, hrho[i]);
     // }
-    
 
     updatePositions<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dt, dev_p, dev_v, dev_x);
     checkCUDAError("updatePositions failed");

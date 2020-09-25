@@ -49,7 +49,7 @@ float lastTime = 0.0f;
 int numFrames = 0;
  
 // camera
-Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
+Camera camera(glm::vec3(0.0f, 0.0f, 1.0f));
 float lastX = SCREEN_WIDTH / 2.0f;
 float lastY = SCREEN_HEIGHT / 2.0f;
 bool firstMouse = true;
@@ -468,7 +468,7 @@ int main(void)
 
     glewInit();
 
-    FluidSimulator *fs = new FluidSimulator(1000, cell_size, gridWidth);
+    FluidSimulator *fs = new FluidSimulator(5000, cell_size, gridWidth);
     //while true:
     // for (int i = 0; i < 3; i++)
     // {
@@ -616,6 +616,7 @@ float verts[] = {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         fs->stepSimulation(dt);
+       // return 0;
         //printf("i=%d\n", numFrames);
         uint cvbo = fs->getVBO();
         int cn = fs->getNumFluidParticles();
@@ -639,6 +640,8 @@ float verts[] = {
         glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT, 0.1f, 100.0f);
         glm::mat4 view = camera.GetViewMatrix();
         glm::mat4 model = glm::mat4(1.0f);
+        //model = glm::translate(model, glm::vec3());
+        
         //Display light cube
         glUseProgram(light_shader_program);
 
