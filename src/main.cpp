@@ -468,7 +468,7 @@ int main(void)
 
     glewInit();
 
-    FluidSimulator *fs = new FluidSimulator(100, cell_size, gridWidth);
+    FluidSimulator *fs = new FluidSimulator(1000, cell_size, gridWidth);
     //while true:
     // for (int i = 0; i < 3; i++)
     // {

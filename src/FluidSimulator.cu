@@ -265,7 +265,7 @@ __global__ void explictEuler(int n, const float dt, float* ix, float* ov, float*
         return;
     }
 
-    //float velo_damp = 0.99f;
+    float velo_damp = 0.99f;
     float g = -9.8f;
     if (op[index*4+1] <= 0)
     {
@@ -279,14 +279,13 @@ __global__ void explictEuler(int n, const float dt, float* ix, float* ov, float*
     ov[index*4+1] = ov[index*4+1] + dt*f_ext_y;
     ov[index*4+2] = ov[index*4+2] + dt*f_ext_z;
 
+    ov[index*4] *= velo_damp;
+    ov[index*4+1] *= velo_damp;
+    ov[index*4+2] *= velo_damp;
+
     op[index*4]   = ix[index*4]   + dt*ov[index*4];
     op[index*4+1] = ix[index*4+1] + dt*ov[index*4+1];
     op[index*4+2] = ix[index*4+2] + dt*ov[index*4+2];
-
-    // if (op[index*4+1] <= 0.0f)
-    // {
-    //     ov[index*4+1] = ov[index*4+1] * -0.3f;
-    // }
 
 }
 
@@ -367,7 +366,7 @@ __global__ void computeLambda(int n, float h, int gridWidth, float rho0, float e
     int particleId = particleIds[index];
     int cell = cellIds[index];
 
-    float C_i = idensity[particleId];
+    float C_i = (idensity[particleId]/rho0) - 1.0f;
 
     int neighboringCells[9];
     for (int i = 0; i < 9; i++)
@@ -524,12 +523,6 @@ __global__ void updatePositions(int n, float dt, const float *ip, float *ov, flo
 
 }
 
-void atest(int* odata)
-{
-    odata[0] = 20;
-    odata[1] = 10;
-    odata[5] = 4;
-}
 
 void FluidSimulator::stepSimulation(const float dt)
 {
@@ -555,26 +548,25 @@ void FluidSimulator::stepSimulation(const float dt)
     findCellsInArray<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, gridWidth, dev_cellIds, dev_cellStarts, dev_cellEnds);
     checkCUDAError("findCellsInArray failed");
 
-    uint* cellIds = new uint[num_fluid_particles];
-    uint* particleIds = new uint[num_fluid_particles];
-    uint* cellStarts = new uint[gridSize];
-    uint* cellEnds = new uint[gridSize];
+    // uint* cellIds = new uint[num_fluid_particles];
+    // uint* particleIds = new uint[num_fluid_particles];
+    // uint* cellStarts = new uint[gridSize];
+    // uint* cellEnds = new uint[gridSize];
 
-    cudaMemcpy(cellIds, dev_cellIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
-    checkCUDAError("memcpy failed");
-    cudaMemcpy(particleIds, dev_particleIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
-    checkCUDAError("memcpy failed");
-    cudaMemcpy(cellStarts, dev_cellStarts, gridSize*sizeof(uint), cudaMemcpyDeviceToHost);
-    checkCUDAError("memcpy failed");
-    cudaMemcpy(cellEnds, dev_cellEnds, gridSize*sizeof(uint), cudaMemcpyDeviceToHost);
-    checkCUDAError("memcpy failed");
+    // cudaMemcpy(cellIds, dev_cellIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
+    // checkCUDAError("memcpy failed");
+    // cudaMemcpy(particleIds, dev_particleIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
+    // checkCUDAError("memcpy failed");
+    // cudaMemcpy(cellStarts, dev_cellStarts, gridSize*sizeof(uint), cudaMemcpyDeviceToHost);
+    // checkCUDAError("memcpy failed");
+    // cudaMemcpy(cellEnds, dev_cellEnds, gridSize*sizeof(uint), cudaMemcpyDeviceToHost);
+    // checkCUDAError("memcpy failed");
     
     int num_iterations = 0;
     while (num_iterations < maxIterations)
     {
         computeDensity<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, dev_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_particleIds, dev_density);
         checkCUDAError("computeDensity failed");
-
 
         computeLambda<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, rho0, epsR, dev_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_particleIds, dev_density, dev_lambda);
         checkCUDAError("computeLambda failed");
@@ -585,6 +577,16 @@ void FluidSimulator::stepSimulation(const float dt)
         cudaDeviceSynchronize();
         num_iterations++;
     }
+
+    // float *hrho = new float[num_fluid_particles];
+    // cudaMemcpy(hrho, dev_density, num_fluid_particles*sizeof(float), cudaMemcpyDeviceToHost);
+    // checkCUDAError("memcpy failed");
+
+    // for (int i = 0; i < num_fluid_particles; i++)
+    // {
+    //     printf("rho[%d] = %f\n", i, hrho[i]);
+    // }
+    
 
     updatePositions<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dt, dev_p, dev_v, dev_x);
     checkCUDAError("updatePositions failed");
@@ -617,6 +619,7 @@ void FluidSimulator::cleanUpSimulation()
     cudaFree(dev_cellIds);
     cudaFree(dev_particleIds);
     cudaFree(dev_cellStarts);
+    cudaFree(dev_cellEnds);
 
     cudaFree(dev_density);
     cudaFree(dev_lambda);
