@@ -34,14 +34,14 @@ void FluidSimulator::AllocCudaArrays()
     checkCUDAError("malloc dev_v failed");
     cudaMalloc((void**)&dev_p, num_fluid_particles*4*sizeof(float));
     checkCUDAError("malloc dev_p failed");
-    cudaMalloc((void**)&dev_x, num_fluid_particles*4*sizeof(float));
-    checkCUDAError("malloc dev_x failed");
+    // cudaMalloc((void**)&dev_x, num_fluid_particles*4*sizeof(float));
+    // checkCUDAError("malloc dev_x failed");
 
     cudaMemcpy(dev_v, v, num_fluid_particles*4*sizeof(float), cudaMemcpyHostToDevice);
     checkCUDAError("memcpy v-->dev_v failed");
 
-    cudaMemcpy(dev_x, x, num_fluid_particles*4*sizeof(float), cudaMemcpyHostToDevice);
-    checkCUDAError("memcpy x-->dev_x failed");
+    // cudaMemcpy(dev_x, x, num_fluid_particles*4*sizeof(float), cudaMemcpyHostToDevice);
+    // checkCUDAError("memcpy x-->dev_x failed");
 
     cudaMalloc((void**)&dev_cellIds, num_fluid_particles*sizeof(uint));
     checkCUDAError("malloc failed");
@@ -83,17 +83,22 @@ void unmapGL(struct cudaGraphicsResource *cuda_resource)
 void FluidSimulator::InitGL()
 {
     //create GL VBO and store in global var.
-    glGenVertexArrays(1, &glVAO);
+    //glGenVertexArrays(1, &glVAO);
     glGenBuffers(1, &glVBO);
 
-    glBindVertexArray(glVAO);
+    //glBindVertexArray(glVAO);
     glBindBuffer(GL_ARRAY_BUFFER, glVBO);
-    glBufferData(GL_ARRAY_BUFFER, num_fluid_particles*4*sizeof(float), x, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, num_fluid_particles*4*sizeof(float), 0, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
-    //glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
+    //glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0);
     //glEnableVertexAttribArray(0);
-    
     //register VBO With Cuda
+    registerVBO_WithCUDA(glVBO, &cudaVBO_resource);
+
+    unregisterVBO_WithCUDA(cudaVBO_resource);
+    glBindBuffer(GL_ARRAY_BUFFER, glVBO);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, num_fluid_particles*4*sizeof(float), x);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
     registerVBO_WithCUDA(glVBO, &cudaVBO_resource);
 
 }
@@ -123,7 +128,7 @@ __global__ void computeSpatialHash(const int n, const float inv_cell_size, const
     //hash position
     int cellId = ip[index*4]*inv_cell_size + ip[index*4+1]*inv_cell_size*gridWidth;
     
-    oCellIds[index] = cellId;
+    oCellIds[index] = abs(cellId);
     oParticleIds[index] = index;
 }
 
@@ -154,7 +159,7 @@ __global__ void findCellsInArray(const int n, const uint* iCellIds, uint* cellSt
     }
 }
 
-__global__ void explictEuler(int n, const float dt, const float* ix, float* ov, float* op)
+__global__ void explictEuler(int n, const float dt, float* ix, float* ov, float* op)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
@@ -172,9 +177,9 @@ __global__ void explictEuler(int n, const float dt, const float* ix, float* ov, 
     ov[index*4+1] = ov[index*4+1] + dt*f_ext_y;
     ov[index*4+2] = ov[index*4+2] + dt*f_ext_z;
 
-    op[index*4]   = ix[index*4]   + dt*ov[index*4];
-    op[index*4+1] = ix[index*4+1] + dt*ov[index*4+1];
-    op[index*4+2] = ix[index*4+2] + dt*ov[index*4+2];
+    ix[index*4]   = ix[index*4]   + dt*ov[index*4];
+    ix[index*4+1] = ix[index*4+1] + dt*ov[index*4+1];
+    ix[index*4+2] = ix[index*4+2] + dt*ov[index*4+2];
 
 }
 
@@ -188,7 +193,7 @@ void FluidSimulator::stepSimulation(const float dt)
     // float *dev_p;
     // float *dev_x;
 
-    dev_x = (float*) mapGL(&cudaVBO_resource);
+    float* dev_x = (float*) mapGL(&cudaVBO_resource);
 
     // cudaMalloc((void**)&dev_v, num_fluid_particles*4*sizeof(float));
     // checkCUDAError("malloc dev_v failed");
@@ -210,6 +215,8 @@ void FluidSimulator::stepSimulation(const float dt)
     //call explict euler per particle. Modifies dev_v and dev_p
     explictEuler<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dt, dev_x, dev_v, dev_p);
     checkCUDAError("explicit euler failed");
+
+    //cudaDeviceSynchronize();
     
     //rehash each step
     // uint *dev_cellIds;
@@ -226,23 +233,29 @@ void FluidSimulator::stepSimulation(const float dt)
     //compute spatial hashes per particle. Modifies dev_CellIds and dev_particleIds
     computeSpatialHash<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, invCellSize, gridWidth, dev_p, dev_cellIds, dev_particleIds);
     checkCUDAError("computeSpatialHash failed");
-    //sort by cellId
+
+    // cudaDeviceSynchronize();
+    // //sort by cellId
     thrustRadixSort(num_fluid_particles, dev_cellIds, dev_particleIds);
     checkCUDAError("thrust error");
-    //get starting index of each cellId in the cellIds and particleIds parallel arrays and store in dev_cellStarts.
+
+    // cudaDeviceSynchronize();
+    // //get starting index of each cellId in the cellIds and particleIds parallel arrays and store in dev_cellStarts.
     findCellsInArray<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dev_cellIds, dev_cellStarts);
     checkCUDAError("findCellsInArray failed");
-
-    // uint* cellIds = new uint[num_fluid_particles];
-    // uint* particleIds = new uint[num_fluid_particles];
-    // uint* cellStarts = new uint[gridSize];
+    // cudaDeviceSynchronize();
+    uint* cellIds = new uint[num_fluid_particles];
+    uint* particleIds = new uint[num_fluid_particles];
+    uint* cellStarts = new uint[gridSize];
     
-    // cudaMemcpy(cellIds, dev_cellIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
-    // checkCUDAError("memcpy failed");
-    // cudaMemcpy(particleIds, dev_particleIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
-    // checkCUDAError("memcpy failed");
-    // cudaMemcpy(cellStarts, dev_cellStarts, gridSize*sizeof(uint), cudaMemcpyDeviceToHost);
-    // checkCUDAError("memcpy failed");
+    cudaMemcpy(cellIds, dev_cellIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
+    checkCUDAError("memcpy failed");
+    cudaMemcpy(particleIds, dev_particleIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
+    checkCUDAError("memcpy failed");
+    cudaMemcpy(cellStarts, dev_cellStarts, gridSize*sizeof(uint), cudaMemcpyDeviceToHost);
+    checkCUDAError("memcpy failed");
+
+   // cudaDeviceSynchronize();
 
     // cudaMemcpy(p, dev_p, num_fluid_particles*4*sizeof(float), cudaMemcpyDeviceToHost);
     // checkCUDAError("memcpy failed");
@@ -260,7 +273,11 @@ void FluidSimulator::stepSimulation(const float dt)
 
     // for (int i = 0; i < num_fluid_particles; i++)
     // {
-    //     printf("cellIds[%d] = %d, particleIds[%d] = %d, cellStarts[%d] = %d\n", i, cellIds[i], i, particleIds[i], cellIds[i], cellStarts[cellIds[i]]);
+    //     printf("gs = %d\n", gridSize);
+    //     printf("cellIds[%d] = %d\n", i, cellIds[i]);
+    //     printf("particleIds[%d] = %d\n", i, particleIds[i]);
+    //     printf("cellStarts[%d] = %d\n", cellIds[i], cellStarts[cellIds[i]]);
+
     // }
     // for (int i = 0; i < gridSize; i++)
     // {
@@ -269,11 +286,8 @@ void FluidSimulator::stepSimulation(const float dt)
 
     //solve
 
-    //unmap(cuda vbo resource);
 
     unmapGL(cudaVBO_resource);
-
-    //move these to a cleanup function
     
 
 }
@@ -297,7 +311,7 @@ int FluidSimulator::getNumFluidParticles(){ return num_fluid_particles; }
 void FluidSimulator::cleanUpSimulation()
 {
     cudaFree(dev_p);
-    cudaFree(dev_x);
+    //cudaFree(dev_x);
     cudaFree(dev_v);
     cudaFree(dev_cellIds);
     cudaFree(dev_particleIds);

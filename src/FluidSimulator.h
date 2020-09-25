@@ -26,7 +26,7 @@ private:
 
     float *dev_v;
     float *dev_p;
-    float *dev_x;
+    //float *dev_x;
 
     uint *dev_cellIds;
     uint *dev_particleIds;

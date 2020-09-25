@@ -468,7 +468,7 @@ int main(void)
 
     glewInit();
 
-    FluidSimulator *fs = new FluidSimulator(4, cell_size, gridWidth);
+    FluidSimulator *fs = new FluidSimulator(100, cell_size, gridWidth);
     //while true:
     // for (int i = 0; i < 3; i++)
     // {
@@ -546,46 +546,47 @@ float verts[] = {
     -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f
 };
 
-    //light cube
-    unsigned int lightVAO, lightVBO;
-    glGenVertexArrays(1, &lightVAO);
-    glGenBuffers(1, &lightVBO);
+    // //light cube
+    // unsigned int lightVAO, lightVBO;
+    // glGenVertexArrays(1, &lightVAO);
+    // glGenBuffers(1, &lightVBO);
+    // printf("light vbo = %d\n", lightVBO);
 
-    glBindVertexArray(lightVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, lightVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+    // glBindVertexArray(lightVAO);
+    // glBindBuffer(GL_ARRAY_BUFFER, lightVBO);
+    // glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
+    // glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)0);
+    // glEnableVertexAttribArray(0);
 
     //ground plane
-    float quad_vertices[] = {
-        -0.5f, -0.5f,
-        0.5f, -0.5f,
-        0.5f, 0.5f,
-        -0.5f, 0.5f
-    };
+    // float quad_vertices[] = {
+    //     -0.5f, -0.5f,
+    //     0.5f, -0.5f,
+    //     0.5f, 0.5f,
+    //     -0.5f, 0.5f
+    // };
 
-    ShaderInfo ground_plane_shader_info[] = {
-        {GL_VERTEX_SHADER, "../shaders/ground.vs"},
-        {GL_FRAGMENT_SHADER, "../shaders/ground.fs"},
-        {GL_NONE, NULL}
-    };
+    // ShaderInfo ground_plane_shader_info[] = {
+    //     {GL_VERTEX_SHADER, "../shaders/ground.vs"},
+    //     {GL_FRAGMENT_SHADER, "../shaders/ground.fs"},
+    //     {GL_NONE, NULL}
+    // };
 
-    GLuint ground_shader_program = LoadShaders(ground_plane_shader_info);
+   // GLuint ground_shader_program = LoadShaders(ground_plane_shader_info);
 
-    printf("ground shader program: %d \n", ground_shader_program);
+  //  printf("ground shader program: %d \n", ground_shader_program);
 
-    unsigned int groundVAO, groundVBO;
-    glGenVertexArrays(1, &groundVAO);
-    glGenBuffers(1, &groundVBO);
+    // unsigned int groundVAO, groundVBO;
+    // glGenVertexArrays(1, &groundVAO);
+    // glGenBuffers(1, &groundVBO);
 
-    glBindVertexArray(groundVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, groundVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(quad_vertices), quad_vertices, GL_STATIC_DRAW);
+    // glBindVertexArray(groundVAO);
+    // glBindBuffer(GL_ARRAY_BUFFER, groundVBO);
+    // glBufferData(GL_ARRAY_BUFFER, sizeof(quad_vertices), quad_vertices, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
+    // glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), (void*)0);
+    // glEnableVertexAttribArray(0);
     while (!glfwWindowShouldClose(window))
     {
         float currentTime = glfwGetTime();
@@ -615,11 +616,11 @@ float verts[] = {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         fs->stepSimulation(dt);
-        printf("i=%d\n", numFrames);
+        //printf("i=%d\n", numFrames);
         uint cvbo = fs->getVBO();
         int cn = fs->getNumFluidParticles();
-        printf("cvbo = %d\n", cvbo);
-        printf("cn = %d\n", cn);
+        //printf("cvbo = %d\n", cvbo);
+        //printf("cn = %d\n", cn);
 
         //float time1 = glfwGetTime();
         //predict_sim_step();
@@ -636,12 +637,13 @@ float verts[] = {
 
         glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCREEN_WIDTH / (float)SCREEN_HEIGHT, 0.1f, 100.0f);
         glm::mat4 view = camera.GetViewMatrix();
-
+        glm::mat4 model = glm::mat4(1.0f);
         //Display light cube
         glUseProgram(light_shader_program);
 
         glUniformMatrix4fv(glGetUniformLocation(light_shader_program, "projection"), 1, GL_FALSE, &projection[0][0]);
         glUniformMatrix4fv(glGetUniformLocation(light_shader_program, "view"), 1, GL_FALSE, &view[0][0]);
+        glUniformMatrix4fv(glGetUniformLocation(light_shader_program, "model"), 1, GL_FALSE, &model[0][0]);
 
         glBindBuffer(GL_ARRAY_BUFFER, cvbo);
         glVertexPointer(4, GL_FLOAT, 0, 0);
@@ -676,20 +678,20 @@ float verts[] = {
         //End Display light cube
 
         // //Display ground plane
-        glUseProgram(ground_shader_program);
+        // glUseProgram(ground_shader_program);
 
-        glUniformMatrix4fv(glGetUniformLocation(ground_shader_program, "projection"), 1, GL_FALSE, &projection[0][0]);
-        glUniformMatrix4fv(glGetUniformLocation(ground_shader_program, "view"), 1, GL_FALSE, &view[0][0]);
+        // glUniformMatrix4fv(glGetUniformLocation(ground_shader_program, "projection"), 1, GL_FALSE, &projection[0][0]);
+        // glUniformMatrix4fv(glGetUniformLocation(ground_shader_program, "view"), 1, GL_FALSE, &view[0][0]);
         
-        glm::mat4 model = glm::mat4(1.0f);
-        //model = glm::translate(model, glm::vec3(xTrans, 0, zTrans));
-        model = glm::scale(model, glm::vec3(qScale));
-        model = glm::rotate(model, 1.5708f, glm::vec3(1,0,0)); //1.5708 radians = 90 degrees
+        // model = glm::mat4(1.0f);
+        // //model = glm::translate(model, glm::vec3(xTrans, 0, zTrans));
+        // model = glm::scale(model, glm::vec3(qScale));
+        // model = glm::rotate(model, 1.5708f, glm::vec3(1,0,0)); //1.5708 radians = 90 degrees
 
-        glUniformMatrix4fv(glGetUniformLocation(ground_shader_program, "model"), 1, GL_FALSE, &model[0][0]);
+        // glUniformMatrix4fv(glGetUniformLocation(ground_shader_program, "model"), 1, GL_FALSE, &model[0][0]);
 
-        glBindVertexArray(groundVAO);
-        glDrawArrays(GL_QUADS, 0, 4);
+        // glBindVertexArray(groundVAO);
+        // glDrawArrays(GL_QUADS, 0, 4);
         //End Display ground plane
 
         glfwSwapBuffers(window);
