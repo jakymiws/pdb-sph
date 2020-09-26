@@ -129,9 +129,9 @@ void FluidSimulator::RandomPositionStart()
 {
     for (int i = 0; i < num_fluid_particles; i++)
     {
-        float xCoord = randomFloatRangef(0.01f, 1.0f);
+        float xCoord = randomFloatRangef(0.01f, 0.5f);
         float yCoord = randomFloatRangef(0.01f, 0.5f);
-        float zCoord = randomFloatRangef(0.01f, 1.0f);
+        float zCoord = randomFloatRangef(0.01f, 0.5f);
 
         x[i*4] = xCoord; x[i*4+1] = yCoord; x[i*4+2] = zCoord; x[i*4+3] = 0.0f;
         v[i*4] = 0.0f;   v[i*4+1] = 0.0f;   v[i*4+2] = 0.0f; v[i*4+3] = 0.0f;
@@ -375,14 +375,15 @@ __global__ void computeDensity(int n, float h, int gridWidth, int gridWidth2, in
         return;
     }
 
-    float h2 = h*h;
-    float h8 = h2*h2*h2*h2;
+    float h2 = 0.01f;
+    float h8 = 1.0e-8;
 
     float _pi = 3.141592f;
     int particleId = particleIds[index];
     int cell = cellIds[index];
 
-    float coeff = (4.0f)/(_pi*h8);
+    //float coeff = (4.0f)/(_pi*h8);
+    float coeff = 1.27324e8;
 
     float ipx = ip[particleId*4];
     float ipy = ip[particleId*4+1];
@@ -498,7 +499,9 @@ __global__ void computeLambda(int n, float h, int gridWidth, int gridWidth2, int
             float rd2 = rx*rx + ry*ry + rz*rz;
             if (rd2 < h2)
             {
-                float rd = sqrtf(rd2);
+                //float q = 2.0f * 
+
+                float rd = sqrt(rd2);
                 float dist2 = (h-rd)*(h-rd);
                 float gradW_x = -coeff*(dist2*rx);
                 float gradW_y = -coeff*(dist2*ry);
@@ -513,7 +516,7 @@ __global__ void computeLambda(int n, float h, int gridWidth, int gridWidth2, int
 
 }
 
-__global__ void projectDensityConstraint(int n, float h, int gridWidth, int gridSize, int gridWidth2, float invRho0, float* op, const uint* cellIds, const uint* cellStarts, const uint* cellEnds, const uint* particleIds, const float* idensity, const float* ilambda)
+__global__ void projectDensityConstraint(int n, float h, int gridWidth,  int gridWidth2, int gridSize, float invRho0, float* op, const uint* cellIds, const uint* cellStarts, const uint* cellEnds, const uint* particleIds, const float* idensity, const float* ilambda)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
@@ -521,26 +524,26 @@ __global__ void projectDensityConstraint(int n, float h, int gridWidth, int grid
         return;
     }
 
-    float h2 = h*h;
-    float h6 = h2*h2*h2;
+    const float h2 = h*h;
+    const float h6 = h2*h2*h2;
 
-    float _pi = 3.141592f;
-    int particleId = particleIds[index];
-    int pidx = particleId*4;
+    const float _pi = 3.141592f;
+    const int particleId = particleIds[index];
+    const int pidx = particleId*4;
 
-    float wCoeff = (15.0f/(_pi*h6));
-    float coeff = (45.0f/((float)_pi*h6));
+    //float wCoeff = (15.0f/(_pi*h6));
+    const float coeff = (45.0f/((float)_pi*h6));
     
     //float W_dq = wCoeff*powf((0.2f),3.0f);
     //float W_dq = wCoeff*0.008f;
-    float s_corr = 0.0001f;
+    const float s_corr = 0.0001f;
 
-    int cell = cellIds[index];
+    const int cell = cellIds[index];
 
-    float lambda = ilambda[particleId];
-    float px = op[pidx];
-    float py = op[pidx+1];
-    float pz = op[pidx+2];
+    const float lambda = ilambda[particleId];
+    const float px = op[pidx];
+    const float py = op[pidx+1];
+    const float pz = op[pidx+2];
 
     int neighboringCells[27] = {0};
 
@@ -549,15 +552,15 @@ __global__ void projectDensityConstraint(int n, float h, int gridWidth, int grid
     //     neighboringCells[i] = i;
     // }
 
-    int num_neighbors_found = getCellNeighbors_3d(cell, gridWidth, gridWidth*gridWidth, gridSize, neighboringCells);
+    const int num_neighbors_found = getCellNeighbors_3d(cell, gridWidth, gridWidth*gridWidth, gridSize, neighboringCells);
     //int num_neighbors_found = 1;
 
     float constraint_sum_x = 0.0f; float constraint_sum_y = 0.0f; float constraint_sum_z = 0.0f;  
     for (int k = 0; k < num_neighbors_found; k++)
     {
-        uint nCell = neighboringCells[k];
-        uint start = cellStarts[nCell];
-        uint end = cellEnds[nCell];
+        const uint nCell = neighboringCells[k];
+        const uint start = cellStarts[nCell];
+        const uint end = cellEnds[nCell];
 
         if (start == end)
         {
@@ -568,33 +571,33 @@ __global__ void projectDensityConstraint(int n, float h, int gridWidth, int grid
             
         for (int i = start; i < end+1; i++)
         {
-            int cellId_i = cellIds[i];
-            int particleId_i = particleIds[i];
-            int pidx_i = particleId_i*4;
+            const int cellId_i = cellIds[i];
+            const int particleId_i = particleIds[i];
+            const int pidx_i = particleId_i*4;
             if (cellId_i != nCell)
             {
                 //we've reached the end of the cell
                 break;
             }
 
-            float rx = px - op[pidx_i];
-            float ry = py - op[pidx_i+1];
-            float rz = pz - op[pidx_i+2];
+            const float rx = px - op[pidx_i];
+            const float ry = py - op[pidx_i+1];
+            const float rz = pz - op[pidx_i+2];
 
-            float rd2 = rx*rx + ry*ry + rz*rz;
+            const float rd2 = rx*rx + ry*ry + rz*rz;
             if (rd2 < h2)
             {
-                float rd = sqrtf(rd2);
+                const float rd = sqrt(rd2);
                 //float W_s = wCoeff*powf((h-rd),3.0f);
                 //float W_s = wCoeff*(h-rd)*(h-rd)*(h-rd);
 
-                float dist2 = (h-rd)*(h-rd);
+                const float dist2 = (h-rd)*(h-rd);
             
-                float gradW_x = -coeff*(dist2*rx);
-                float gradW_y = -coeff*(dist2*ry);
-                float gradW_z = -coeff*(dist2*rz);
+                const float gradW_x = -coeff*(dist2*rx);
+                const float gradW_y = -coeff*(dist2*ry);
+                const float gradW_z = -coeff*(dist2*rz);
 
-                float lambda_sum = lambda + ilambda[particleId_i] + s_corr;
+                const float lambda_sum = lambda + ilambda[particleId_i] + s_corr;
                 
                 constraint_sum_x += lambda_sum * gradW_x;
                 constraint_sum_y += lambda_sum * gradW_y;
@@ -617,7 +620,6 @@ __global__ void updatePositions(int n, float dt, const float *ip, float *ov, flo
         return;
     }
 
-
     ov[index*4] = (ip[index*4]-ox[index*4])/dt;
     ov[index*4+1] = (ip[index*4+1]-ox[index*4+1])/dt;
     ov[index*4+2] = (ip[index*4+2]-ox[index*4+2])/dt;
@@ -626,10 +628,11 @@ __global__ void updatePositions(int n, float dt, const float *ip, float *ov, flo
     ox[index*4+1] = ip[index*4+1];
     ox[index*4+2] = ip[index*4+2];
 
-    const float collDamp = 0.5f;
+    const float collDamp = 0.75f;
     float wall = 1.0f;
+    float xWall = 2.2f;
     
-    if (ox[index*4+1] <= 0.0f && ov[index*4+1] != 0.0f)
+    if (ox[index*4+1] < 0.0f && ov[index*4+1] != 0.0f)
     {
         float tColl = (ox[index*4+1]-0.0f) / ov[index*4+1];
 
@@ -646,7 +649,7 @@ __global__ void updatePositions(int n, float dt, const float *ip, float *ov, flo
         ov[index*4+1] *= collDamp;
         ov[index*4+2] *= collDamp;
     }
-    if (ox[index*4+1] >= wall && ov[index*4+1] != 0.0f)
+    if (ox[index*4+1] > wall && ov[index*4+1] != 0.0f)
     {
         float tColl = (ox[index*4+1]-wall) / ov[index*4+1];
 
@@ -664,7 +667,7 @@ __global__ void updatePositions(int n, float dt, const float *ip, float *ov, flo
         ov[index*4+2] *= collDamp;
     }
 
-    if (ox[index*4] <= 0.0f && ov[index*4] != 0.0f)
+    if (ox[index*4] < 0.0f && ov[index*4] != 0.0f)
     {
         float tColl = (ox[index*4]-0.0f) / ov[index*4];
 
@@ -682,7 +685,7 @@ __global__ void updatePositions(int n, float dt, const float *ip, float *ov, flo
         ov[index*4+2] *= collDamp;
     }
 
-    if (ox[index*4+2] <= 0.0f && ov[index*4+2] != 0.0f)
+    if (ox[index*4+2] < 0.0f && ov[index*4+2] != 0.0f)
     {
         float tColl = (ox[index*4+2]-0.0f) / ov[index*4+2];
 
@@ -700,16 +703,16 @@ __global__ void updatePositions(int n, float dt, const float *ip, float *ov, flo
         ov[index*4+2] *= collDamp;
     }
 
-    if (ox[index*4] > wall && ov[index*4] != 0.0f)
+    if (ox[index*4] > xWall && ov[index*4] != 0.0f)
     {
-        float tColl = (ox[index*4]-wall) / ov[index*4];
+        float tColl = (ox[index*4]-xWall) / ov[index*4];
 
         ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
         ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
         ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
 
         //ox[index*4] = 2.0f*0.0f-ox[index*4];
-        ox[index*4] = 2.0f*wall-ox[index*4];
+        ox[index*4] = 2.0f*xWall-ox[index*4];
 
         ov[index*4] *= -1.0f;
 
@@ -726,7 +729,6 @@ __global__ void updatePositions(int n, float dt, const float *ip, float *ov, flo
         ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
         ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
 
-        //ox[index*4] = 2.0f*0.0f-ox[index*4];
         ox[index*4+2] = 2.0f*wall-ox[index*4+2];
 
         ov[index*4+2] *= -1.0f;
@@ -854,26 +856,26 @@ void FluidSimulator::stepSimulation(const float dt)
     int num_iterations = 0;
     while (num_iterations < maxIterations)
     {
-        //timer().startGpuTimer();
+       // timer().startGpuTimer();
         computeDensity<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, dev_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_particleIds, dev_density);
         checkCUDAError("computeDensity failed");
         //timer().endGpuTimer();
         //float time4 = timer().getGpuElapsedTimeForPreviousOperation();
         //printf("it %d computeDensity = %f\n", num_iterations, time4);
         
-        //timer().startGpuTimer();
+       // timer().startGpuTimer();
         computeLambda<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, invRho0, epsR, dev_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_particleIds, dev_density, dev_lambda);
         checkCUDAError("computeLambda failed");
         //timer().endGpuTimer();
-        //float time5 = timer().getGpuElapsedTimeForPreviousOperation();
+       // float time5 = timer().getGpuElapsedTimeForPreviousOperation();
         //printf("it %d computeLambda = %f\n", num_iterations, time5);
 
         //timer().startGpuTimer();
         projectDensityConstraint<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, invRho0, dev_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_particleIds, dev_density, dev_lambda);
         checkCUDAError("projectDensityConstraint failed");
         //timer().endGpuTimer();
-        //float time6 = timer().getGpuElapsedTimeForPreviousOperation();
-        //printf("it %d projectDensityConstraint = %f\n", num_iterations, time6);
+       // float time6 = timer().getGpuElapsedTimeForPreviousOperation();
+       // printf("it %d projectDensityConstraint = %f\n", num_iterations, time6);
 
         cudaDeviceSynchronize();
         num_iterations++;
