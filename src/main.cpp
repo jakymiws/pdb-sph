@@ -71,7 +71,7 @@ int maxIterations = 4;
 const float gravity_accel = -9.8f;
 const float velo_damp = 0.99f;
 
-float dt = 0.016f;
+float dt = 0.006f;
 
 float mass = 1.0f;
 float wMass = 1.0f/mass;
@@ -657,7 +657,7 @@ int main(void)
         glUniformMatrix4fv(glGetUniformLocation(light_shader_program, "model"), 1, GL_FALSE, &model[0][0]);
 
         glBindBuffer(GL_ARRAY_BUFFER, cvbo);
-        glVertexPointer(4, GL_FLOAT, 0, 0);
+        glVertexPointer(3, GL_FLOAT, 0, 0);
         glEnableClientState(GL_VERTEX_ARRAY);
         glDrawArrays(GL_POINTS, 0, cn);
         glBindBuffer(GL_ARRAY_BUFFER, 0);

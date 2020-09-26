@@ -20,9 +20,9 @@ FluidSimulator::FluidSimulator(int n, float _cellSize, int _gridWidth)
     cellSize = _cellSize;
     invCellSize = 1.0f/cellSize;
 
-    x = new float[num_fluid_particles*4]; 
-    p = new float[num_fluid_particles*4]; 
-    v = new float[num_fluid_particles*4];
+    x = new float[num_fluid_particles*3]; 
+    p = new float[num_fluid_particles*3]; 
+    v = new float[num_fluid_particles*3];
 
     h = 0.1f;
     rho0 = 6378.0f;
@@ -44,9 +44,9 @@ FluidSimulator::FluidSimulator(int n, float _cellSize, int _gridWidth)
 
 void FluidSimulator::AllocCudaArrays()
 {
-    cudaMalloc((void**)&dev_v, num_fluid_particles*4*sizeof(float));
+    cudaMalloc((void**)&dev_v, num_fluid_particles*3*sizeof(float));
     checkCUDAError("malloc dev_v failed");
-    cudaMalloc((void**)&dev_p, num_fluid_particles*4*sizeof(float));
+    cudaMalloc((void**)&dev_p, num_fluid_particles*3*sizeof(float));
     checkCUDAError("malloc dev_p failed");
     // cudaMalloc((void**)&dev_x, num_fluid_particles*4*sizeof(float));
     // checkCUDAError("malloc dev_x failed");
@@ -57,7 +57,7 @@ void FluidSimulator::AllocCudaArrays()
     checkCUDAError("malloc dev_p failed");
     
 
-    cudaMemcpy(dev_v, v, num_fluid_particles*4*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_v, v, num_fluid_particles*3*sizeof(float), cudaMemcpyHostToDevice);
     checkCUDAError("memcpy v-->dev_v failed");
 
     // cudaMemcpy(dev_x, x, num_fluid_particles*4*sizeof(float), cudaMemcpyHostToDevice);
@@ -110,7 +110,7 @@ void FluidSimulator::InitGL()
 
     //glBindVertexArray(glVAO);
     glBindBuffer(GL_ARRAY_BUFFER, glVBO);
-    glBufferData(GL_ARRAY_BUFFER, num_fluid_particles*4*sizeof(float), 0, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, num_fluid_particles*3*sizeof(float), 0, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     //glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0);
     //glEnableVertexAttribArray(0);
@@ -119,7 +119,7 @@ void FluidSimulator::InitGL()
 
     unregisterVBO_WithCUDA(cudaVBO_resource);
     glBindBuffer(GL_ARRAY_BUFFER, glVBO);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, num_fluid_particles*4*sizeof(float), x);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, num_fluid_particles*3*sizeof(float), x);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     registerVBO_WithCUDA(glVBO, &cudaVBO_resource);
 
@@ -133,8 +133,8 @@ void FluidSimulator::RandomPositionStart()
         float yCoord = randomFloatRangef(0.01f, 0.49f);
         float zCoord = randomFloatRangef(0.01f, 0.49f);
 
-        x[i*4] = xCoord; x[i*4+1] = yCoord; x[i*4+2] = zCoord; x[i*4+3] = 0.0f;
-        v[i*4] = 0.0f;   v[i*4+1] = 0.0f;   v[i*4+2] = 0.0f; v[i*4+3] = 0.0f;
+        x[i*3] = xCoord; x[i*3+1] = yCoord; x[i*3+2] = zCoord;
+        v[i*3] = 0.0f;   v[i*3+1] = 0.0f;   v[i*3+2] = 0.0f; 
 
     }
 }
@@ -287,7 +287,7 @@ __global__ void computeSpatialHash(const int n, const float inv_cell_size, const
         return;
     }
     //hash position
-    int cellId = (int)(ip[index*4]*inv_cell_size) + ((int)(ip[index*4+1]*inv_cell_size))*gridWidth + ((int)(ip[index*4+2]*inv_cell_size))*gridWidth*gridWidth;
+    int cellId = (int)(ip[index*3]*inv_cell_size) + ((int)(ip[index*3+1]*inv_cell_size))*gridWidth + ((int)(ip[index*3+2]*inv_cell_size))*gridWidth*gridWidth;
     
     if (cellId >= 0)
     {
@@ -353,17 +353,17 @@ __global__ void explictEuler(int n, const float dt, float* ix, float* ov, float*
 
     //int i4 = index*4;
 
-    ov[index*4]   = ov[index*4]   + dt*f_ext_x;
-    ov[index*4+1] = ov[index*4+1] + dt*f_ext_y;
-    ov[index*4+2] = ov[index*4+2] + dt*f_ext_z;
+    ov[index*3]   = ov[index*3]   + dt*f_ext_x;
+    ov[index*3+1] = ov[index*3+1] + dt*f_ext_y;
+    ov[index*3+2] = ov[index*3+2] + dt*f_ext_z;
 
-    ov[index*4] *= velo_damp;
-    ov[index*4+1] *= velo_damp;
-    ov[index*4+2] *= velo_damp;
+    ov[index*3] *= velo_damp;
+    ov[index*3+1] *= velo_damp;
+    ov[index*3+2] *= velo_damp;
 
-    op[index*4]   = ix[index*4]   + dt*ov[index*4];
-    op[index*4+1] = ix[index*4+1] + dt*ov[index*4+1];
-    op[index*4+2] = ix[index*4+2] + dt*ov[index*4+2];
+    op[index*3]   = ix[index*3]   + dt*ov[index*3];
+    op[index*3+1] = ix[index*3+1] + dt*ov[index*3+1];
+    op[index*3+2] = ix[index*3+2] + dt*ov[index*3+2];
 
 }
 
@@ -385,9 +385,9 @@ __global__ void computeDensity(int n, float h, int gridWidth, int gridWidth2, in
     float coeff = (4.0f)/(_pi*h8);
     //float coeff = 1.27324e8;
 
-    float ipx = ip[particleId*4];
-    float ipy = ip[particleId*4+1];
-    float ipz = ip[particleId*4+2];
+    float ipx = ip[particleId*3];
+    float ipy = ip[particleId*3+1];
+    float ipz = ip[particleId*3+2];
 
     int neighboringCells[27] = {0};
 
@@ -417,9 +417,9 @@ __global__ void computeDensity(int n, float h, int gridWidth, int gridWidth2, in
                 break;
             }
 
-            float rx = ipx - ip[particleId_i*4];
-            float ry = ipy - ip[particleId_i*4+1];
-            float rz = ipz - ip[particleId_i*4+2];
+            float rx = ipx - ip[particleId_i*3];
+            float ry = ipy - ip[particleId_i*3+1];
+            float rz = ipz - ip[particleId_i*3+2];
 
             float rd2 = rx*rx + ry*ry + rz*rz;
             if (rd2 < h2)
@@ -455,9 +455,9 @@ __global__ void computeLambda(int n, float h, int gridWidth, int gridWidth2, int
     int particleId = particleIds[index];
     int cell = cellIds[index];
 
-    float ipx = ip[particleId*4];
-    float ipy = ip[particleId*4+1];
-    float ipz = ip[particleId*4+2];
+    float ipx = ip[particleId*3];
+    float ipy = ip[particleId*3+1];
+    float ipz = ip[particleId*3+2];
 
     float C_i = (idensity[particleId]*invRho0) - 1.0f;
     
@@ -492,9 +492,9 @@ __global__ void computeLambda(int n, float h, int gridWidth, int gridWidth2, int
                 break;
             }
 
-            float rx = ipx - ip[particleId_i*4];
-            float ry = ipy - ip[particleId_i*4+1];
-            float rz = ipz - ip[particleId_i*4+2];
+            float rx = ipx - ip[particleId_i*3];
+            float ry = ipy - ip[particleId_i*3+1];
+            float rz = ipz - ip[particleId_i*3+2];
 
             float rd2 = rx*rx + ry*ry + rz*rz;
             if (rd2 < h2)
@@ -529,7 +529,7 @@ __global__ void projectDensityConstraint(int n, float h, int gridWidth,  int gri
 
     const float _pi = 3.141592f;
     const int particleId = particleIds[index];
-    const int pidx = particleId*4;
+    const int pidx = particleId*3;
 
     const float wCoeff = (15.0f/(_pi*h6));
     const float coeff = (45.0f/((float)_pi*h6));
@@ -573,7 +573,7 @@ __global__ void projectDensityConstraint(int n, float h, int gridWidth,  int gri
         {
             const int cellId_i = cellIds[i];
             const int particleId_i = particleIds[i];
-            const int pidx_i = particleId_i*4;
+            const int pidx_i = particleId_i*3;
             if (cellId_i != nCell)
             {
                 //we've reached the end of the cell
@@ -621,180 +621,123 @@ __global__ void updatePositions(int n, float dt, const float *ip, float *ov, flo
         return;
     }
 
-    ov[index*4] = (ip[index*4]-ox[index*4])/dt;
-    ov[index*4+1] = (ip[index*4+1]-ox[index*4+1])/dt;
-    ov[index*4+2] = (ip[index*4+2]-ox[index*4+2])/dt;
+    ov[index*3] = (ip[index*3]-ox[index*3])/dt;
+    ov[index*3+1] = (ip[index*3+1]-ox[index*3+1])/dt;
+    ov[index*3+2] = (ip[index*3+2]-ox[index*3+2])/dt;
     
-    ox[index*4] = ip[index*4];
-    ox[index*4+1] = ip[index*4+1];
-    ox[index*4+2] = ip[index*4+2];
+    ox[index*3] = ip[index*3];
+    ox[index*3+1] = ip[index*3+1];
+    ox[index*3+2] = ip[index*3+2];
 
     const float collDamp = 0.75f;
     float wall = 0.5f;
     float xWall = 1.0f;
     
-    if (ox[index*4+1] < 0.0f && ov[index*4+1] != 0.0f)
+    if (ox[index*3+1] < 0.0f && ov[index*3+1] != 0.0f)
     {
-        float tColl = (ox[index*4+1]-0.0f) / ov[index*4+1];
+        float tColl = (ox[index*3+1]-0.0f) / ov[index*3+1];
 
-        ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
-        ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
-        ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+        ox[index*3] -= ov[index*3]*(1-collDamp)*tColl;
+        ox[index*3+1] -= ov[index*3+1]*(1-collDamp)*tColl;
+        ox[index*3+2] -= ov[index*3+2]*(1-collDamp)*tColl;
 
         //ox[index*4] = 2.0f*0.0f-ox[index*4];
-        ox[index*4+1] = 2.0f*0.0f-ox[index*4+1];
+        ox[index*3+1] = 2.0f*0.0f-ox[index*3+1];
 
-        ov[index*4+1] *= -1.0f;
+        ov[index*3+1] *= -1.0f;
 
-        ov[index*4] *= collDamp;
-        ov[index*4+1] *= collDamp;
-        ov[index*4+2] *= collDamp;
+        ov[index*3] *= collDamp;
+        ov[index*3+1] *= collDamp;
+        ov[index*3+2] *= collDamp;
     }
-    if (ox[index*4+1] > wall && ov[index*4+1] != 0.0f)
+    if (ox[index*3+1] > wall && ov[index*3+1] != 0.0f)
     {
-        float tColl = (ox[index*4+1]-wall) / ov[index*4+1];
+        float tColl = (ox[index*3+1]-wall) / ov[index*3+1];
 
-        ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
-        ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
-        ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+        ox[index*3] -= ov[index*3]*(1-collDamp)*tColl;
+        ox[index*3+1] -= ov[index*3+1]*(1-collDamp)*tColl;
+        ox[index*3+2] -= ov[index*3+2]*(1-collDamp)*tColl;
 
         //ox[index*4] = 2.0f*0.0f-ox[index*4];
-        ox[index*4+1] = 2.0f*wall-ox[index*4+1];
+        ox[index*3+1] = 2.0f*wall-ox[index*3+1];
 
-        ov[index*4+1] *= -1.0f;
+        ov[index*3+1] *= -1.0f;
 
-        ov[index*4] *= collDamp;
-        ov[index*4+1] *= collDamp;
-        ov[index*4+2] *= collDamp;
-    }
-
-    if (ox[index*4] < 0.0f && ov[index*4] != 0.0f)
-    {
-        float tColl = (ox[index*4]-0.0f) / ov[index*4];
-
-        ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
-        ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
-        ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
-
-        //ox[index*4] = 2.0f*0.0f-ox[index*4];
-        ox[index*4] = 2.0f*0.0f-ox[index*4];
-
-        ov[index*4] *= -1.0f;
-
-        ov[index*4] *= collDamp;
-        ov[index*4+1] *= collDamp;
-        ov[index*4+2] *= collDamp;
+        ov[index*3] *= collDamp;
+        ov[index*3+1] *= collDamp;
+        ov[index*3+2] *= collDamp;
     }
 
-    if (ox[index*4+2] < 0.0f && ov[index*4+2] != 0.0f)
+    if (ox[index*3] < 0.0f && ov[index*3] != 0.0f)
     {
-        float tColl = (ox[index*4+2]-0.0f) / ov[index*4+2];
+        float tColl = (ox[index*3]-0.0f) / ov[index*3];
 
-        ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
-        ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
-        ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+        ox[index*3] -= ov[index*3]*(1-collDamp)*tColl;
+        ox[index*3+1] -= ov[index*3+1]*(1-collDamp)*tColl;
+        ox[index*3+2] -= ov[index*3+2]*(1-collDamp)*tColl;
 
         //ox[index*4] = 2.0f*0.0f-ox[index*4];
-        ox[index*4+2] = 2.0f*0.0f-ox[index*4+2];
+        ox[index*3] = 2.0f*0.0f-ox[index*3];
+
+        ov[index*3] *= -1.0f;
+
+        ov[index*3] *= collDamp;
+        ov[index*3+1] *= collDamp;
+        ov[index*3+2] *= collDamp;
+    }
+
+    if (ox[index*3+2] < 0.0f && ov[index*3+2] != 0.0f)
+    {
+        float tColl = (ox[index*3+2]-0.0f) / ov[index*3+2];
+
+        ox[index*3] -= ov[index*3]*(1-collDamp)*tColl;
+        ox[index*3+1] -= ov[index*3+1]*(1-collDamp)*tColl;
+        ox[index*3+2] -= ov[index*3+2]*(1-collDamp)*tColl;
+
+        //ox[index*4] = 2.0f*0.0f-ox[index*4];
+        ox[index*3+2] = 2.0f*0.0f-ox[index*3+2];
         
-        ov[index*4+2] *= -1.0f;
+        ov[index*3+2] *= -1.0f;
 
-        ov[index*4] *= collDamp;
-        ov[index*4+1] *= collDamp;
-        ov[index*4+2] *= collDamp;
+        ov[index*3] *= collDamp;
+        ov[index*3+1] *= collDamp;
+        ov[index*3+2] *= collDamp;
     }
 
-    if (ox[index*4] > xWall && ov[index*4] != 0.0f)
+    if (ox[index*3] > xWall && ov[index*3] != 0.0f)
     {
-        float tColl = (ox[index*4]-xWall) / ov[index*4];
+        float tColl = (ox[index*3]-xWall) / ov[index*3];
 
-        ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
-        ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
-        ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+        ox[index*3] -= ov[index*3]*(1-collDamp)*tColl;
+        ox[index*3+1] -= ov[index*3+1]*(1-collDamp)*tColl;
+        ox[index*3+2] -= ov[index*3+2]*(1-collDamp)*tColl;
 
         //ox[index*4] = 2.0f*0.0f-ox[index*4];
-        ox[index*4] = 2.0f*xWall-ox[index*4];
+        ox[index*3] = 2.0f*xWall-ox[index*3];
 
-        ov[index*4] *= -1.0f;
+        ov[index*3] *= -1.0f;
 
-        ov[index*4] *= collDamp;
-        ov[index*4+1] *= collDamp;
-        ov[index*4+2] *= collDamp;
+        ov[index*3] *= collDamp;
+        ov[index*3+1] *= collDamp;
+        ov[index*3+2] *= collDamp;
     }
 
-    if (ox[index*4+2] > wall && ov[index*4+2] != 0.0f)
+    if (ox[index*3+2] > wall && ov[index*3+2] != 0.0f)
     {
-        float tColl = (ox[index*4+2]-wall) / ov[index*4+2];
+        float tColl = (ox[index*3+2]-wall) / ov[index*3+2];
 
-        ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
-        ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
-        ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+        ox[index*3] -= ov[index*3]*(1-collDamp)*tColl;
+        ox[index*3+1] -= ov[index*3+1]*(1-collDamp)*tColl;
+        ox[index*3+2] -= ov[index*3+2]*(1-collDamp)*tColl;
 
-        ox[index*4+2] = 2.0f*wall-ox[index*4+2];
+        ox[index*3+2] = 2.0f*wall-ox[index*3+2];
 
-        ov[index*4+2] *= -1.0f;
+        ov[index*3+2] *= -1.0f;
 
-        ov[index*4] *= collDamp;
-        ov[index*4+1] *= collDamp;
-        ov[index*4+2] *= collDamp;
+        ov[index*3] *= collDamp;
+        ov[index*3+1] *= collDamp;
+        ov[index*3+2] *= collDamp;
     }
-
-
-    // if (ox[index*4] <= 0.0f)
-    // {
-    //     float tColl = (ox[index*4]-0.0f)/ov[index*4];
-    //     ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
-    //     ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
-    //     ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
-
-    //     ox[index*4] = 2.0f*0.0f-ox[index*4];
-
-    //     ov[index*4] *= -1.0f;
-    //     ov[index*4+1] *= -1.0f;
-    //     ov[index*4+2] *= -1.0f;
-    // }
-
-    // if (ox[index*4] >= wall)
-    // {
-    //     float tColl = (ox[index*4]-0.0f)/ov[index*4];
-    //     ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
-    //     ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
-    //     ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
-
-    //     ox[index*4] = 2.0f*0.0f-ox[index*4];
-
-    //     ov[index*4] *= -1.0f;
-    //     ov[index*4+1] *= -1.0f;
-    //     ov[index*4+2] *= -1.0f;
-    // }
-
-    // if (ox[index*4+2] >= wall)
-    // {
-    //     float tColl = (ox[index*4+2]-0.0f)/ov[index*4]+2;
-    //     ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
-    //     ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
-    //     ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
-
-    //     ox[index*4+2] = 2.0f*0.0f-ox[index*4];
-
-    //     ov[index*4] *= -1.0f;
-    //     ov[index*4+1] *= -1.0f;
-    //     ov[index*4+2] *= -1.0f;
-    // }
-
-    // if (ox[index*4] <= 0.0f)
-    // {
-    //     float tColl = (ox[index*4+2]-0.0f)/ov[index*4+2];
-    //     ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
-    //     ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
-    //     ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
-
-    //     ox[index*4+2] = 2.0f*0.0f-ox[index*4];
-
-    //     ov[index*4] *= -1.0f;
-    //     ov[index*4+1] *= -1.0f;
-    //     ov[index*4+2] *= -1.0f;
-    // }
 
 
 }
