@@ -71,7 +71,7 @@ int maxIterations = 4;
 const float gravity_accel = -9.8f;
 const float velo_damp = 0.99f;
 
-float dt = 0.01f;
+float dt = 0.016f;
 
 float mass = 1.0f;
 float wMass = 1.0f/mass;
@@ -471,7 +471,7 @@ int main(void)
 
     glewInit();
 
-    FluidSimulator *fs = new FluidSimulator(100000, 0.03f, 60);
+    FluidSimulator *fs = new FluidSimulator(20000, 0.08f, 80);
     //while true:
     // for (int i = 0; i < 3; i++)
     // {

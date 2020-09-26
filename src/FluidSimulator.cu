@@ -129,9 +129,9 @@ void FluidSimulator::RandomPositionStart()
 {
     for (int i = 0; i < num_fluid_particles; i++)
     {
-        float xCoord = randomFloatRangef(0.01f, 0.5f);
-        float yCoord = randomFloatRangef(0.01f, 0.5f);
-        float zCoord = randomFloatRangef(0.01f, 0.5f);
+        float xCoord = randomFloatRangef(0.01f, 1.0f);
+        float yCoord = randomFloatRangef(0.01f, 0.49f);
+        float zCoord = randomFloatRangef(0.01f, 0.49f);
 
         x[i*4] = xCoord; x[i*4+1] = yCoord; x[i*4+2] = zCoord; x[i*4+3] = 0.0f;
         v[i*4] = 0.0f;   v[i*4+1] = 0.0f;   v[i*4+2] = 0.0f; v[i*4+3] = 0.0f;
@@ -375,15 +375,15 @@ __global__ void computeDensity(int n, float h, int gridWidth, int gridWidth2, in
         return;
     }
 
-    float h2 = 0.01f;
-    float h8 = 1.0e-8;
+    float h2 = h*h;
+    float h8 = h2*h2*h2*h2;
 
     float _pi = 3.141592f;
     int particleId = particleIds[index];
     int cell = cellIds[index];
 
-    //float coeff = (4.0f)/(_pi*h8);
-    float coeff = 1.27324e8;
+    float coeff = (4.0f)/(_pi*h8);
+    //float coeff = 1.27324e8;
 
     float ipx = ip[particleId*4];
     float ipy = ip[particleId*4+1];
@@ -445,13 +445,13 @@ __global__ void computeLambda(int n, float h, int gridWidth, int gridWidth2, int
 
     // float h8 = powf(h, 8);
     // float h6 = powf(h, 6);
-    //float h2 = h*h;
-    float h2 = 0.01f;
-    //float h6 = h2*h2*h2;
-    float h6 = 0.000001f;
-    float h8 = 1.0e-8;
+    float h2 = h*h;
+    //float h2 = 0.01f;
+    float h6 = h2*h2*h2;
+    //float h6 = 0.000001f;
+    float h8 = h6*h2;
 
-    //float _pi = 3.141592f;
+    float _pi = 3.141592f;
     int particleId = particleIds[index];
     int cell = cellIds[index];
 
@@ -461,8 +461,8 @@ __global__ void computeLambda(int n, float h, int gridWidth, int gridWidth2, int
 
     float C_i = (idensity[particleId]*invRho0) - 1.0f;
     
-    //float coeff = (45.0f/((float)_pi*h6))*invRho0;
-    float coeff = 2245.84f;
+    float coeff = (45.0f/((float)_pi*h6))*invRho0;
+    //float coeff = 2245.84f;
 
     int neighboringCells[27] = {0};
 
@@ -531,12 +531,12 @@ __global__ void projectDensityConstraint(int n, float h, int gridWidth,  int gri
     const int particleId = particleIds[index];
     const int pidx = particleId*4;
 
-    //float wCoeff = (15.0f/(_pi*h6));
+    const float wCoeff = (15.0f/(_pi*h6));
     const float coeff = (45.0f/((float)_pi*h6));
     
     //float W_dq = wCoeff*powf((0.2f),3.0f);
-    //float W_dq = wCoeff*0.008f;
-    const float s_corr = 0.0001f;
+    const float W_dq = wCoeff*0.2f*0.2f*0.2f;
+    //const float s_corr = 0.0001f;
 
     const int cell = cellIds[index];
 
@@ -589,7 +589,8 @@ __global__ void projectDensityConstraint(int n, float h, int gridWidth,  int gri
             {
                 const float rd = sqrt(rd2);
                 //float W_s = wCoeff*powf((h-rd),3.0f);
-                //float W_s = wCoeff*(h-rd)*(h-rd)*(h-rd);
+                const float W_s = wCoeff*(h-rd)*(h-rd)*(h-rd);
+                const float s_corr = 0.1f*h*(W_s/W_dq)*(W_s/W_dq)*(W_s/W_dq)*(W_s/W_dq);
 
                 const float dist2 = (h-rd)*(h-rd);
             
@@ -629,8 +630,8 @@ __global__ void updatePositions(int n, float dt, const float *ip, float *ov, flo
     ox[index*4+2] = ip[index*4+2];
 
     const float collDamp = 0.75f;
-    float wall = 1.0f;
-    float xWall = 2.2f;
+    float wall = 0.5f;
+    float xWall = 1.0f;
     
     if (ox[index*4+1] < 0.0f && ov[index*4+1] != 0.0f)
     {
