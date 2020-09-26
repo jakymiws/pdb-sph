@@ -49,7 +49,9 @@ float lastTime = 0.0f;
 int numFrames = 0;
  
 // camera
-Camera camera(glm::vec3(0.0f, 0.0f, 1.0f));
+Camera camera(glm::vec3(-0.671258f,0.214835f,-0.302897f));
+
+
 float lastX = SCREEN_WIDTH / 2.0f;
 float lastY = SCREEN_HEIGHT / 2.0f;
 bool firstMouse = true;
@@ -68,7 +70,7 @@ int maxIterations = 4;
 
 const float gravity_accel = -9.8f;
 const float velo_damp = 0.99f;
-float dt = 0.0083f;
+float dt = 0.016f;
 
 float mass = 1.0f;
 float wMass = 1.0f/mass;
@@ -442,7 +444,7 @@ int main(void)
     if (!glfwInit())
         exit(EXIT_FAILURE);
 
-    init_fluid();
+   // init_fluid();
 
     GLFWwindow* window;
     GLuint vertex_buffer, vertex_shader, fragment_shader, program;
@@ -468,7 +470,7 @@ int main(void)
 
     glewInit();
 
-    FluidSimulator *fs = new FluidSimulator(5000, cell_size, gridWidth);
+    FluidSimulator *fs = new FluidSimulator(40000, 0.1f, 34);
     //while true:
     // for (int i = 0; i < 3; i++)
     // {
@@ -502,49 +504,49 @@ int main(void)
 
     printf("light shader program: %d \n", light_shader_program);
 
-float verts[] = {
-    -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
-     0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
-     0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
-     0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
-    -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
-    -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+// float verts[] = {
+//     -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
+//      0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+//      0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+//      0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+//     -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+//     -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
 
-    -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
-     0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
-     0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
-     0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
-    -0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
-    -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+//     -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+//      0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+//      0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+//      0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+//     -0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+//     -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
 
-    -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
-    -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
-    -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
-    -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
-    -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
-    -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
+//     -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
+//     -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
+//     -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
+//     -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
+//     -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
+//     -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
 
-     0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
-     0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
-     0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
-     0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
-     0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
-     0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
+//      0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
+//      0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
+//      0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
+//      0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
+//      0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
+//      0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
 
-    -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
-     0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
-     0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
-     0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
-    -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
-    -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
+//     -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
+//      0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
+//      0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
+//      0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
+//     -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
+//     -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
 
-    -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
-     0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
-     0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
-     0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
-    -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
-    -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f
-};
+//     -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
+//      0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
+//      0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
+//      0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
+//     -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
+//     -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f
+// };
 
     // //light cube
     // unsigned int lightVAO, lightVBO;
@@ -587,6 +589,10 @@ float verts[] = {
 
     // glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2*sizeof(float), (void*)0);
     // glEnableVertexAttribArray(0);
+
+    uint cvbo = fs->getVBO();
+    int cn = fs->getNumFluidParticles();
+
     while (!glfwWindowShouldClose(window))
     {
         float currentTime = glfwGetTime();
@@ -618,8 +624,7 @@ float verts[] = {
         fs->stepSimulation(dt);
        // return 0;
         //printf("i=%d\n", numFrames);
-        uint cvbo = fs->getVBO();
-        int cn = fs->getNumFluidParticles();
+       
         //return 0;
         //printf("cvbo = %d\n", cvbo);
         //printf("cn = %d\n", cn);
@@ -644,6 +649,7 @@ float verts[] = {
         
         //Display light cube
         glUseProgram(light_shader_program);
+        glEnable(GL_PROGRAM_POINT_SIZE);
 
         glUniformMatrix4fv(glGetUniformLocation(light_shader_program, "projection"), 1, GL_FALSE, &projection[0][0]);
         glUniformMatrix4fv(glGetUniformLocation(light_shader_program, "view"), 1, GL_FALSE, &view[0][0]);

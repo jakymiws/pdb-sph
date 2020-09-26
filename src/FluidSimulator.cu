@@ -3,11 +3,18 @@
 
 #include "common.h"
 
-FluidSimulator::FluidSimulator(int n, int _cellSize, int _gridWidth)
+PerformanceTimer& timer()
+        {
+            static PerformanceTimer timer;
+            return timer;
+        }
+
+FluidSimulator::FluidSimulator(int n, float _cellSize, int _gridWidth)
 {
     num_fluid_particles = n;
 
     gridWidth = _gridWidth;
+    gridWidth2 = gridWidth*gridWidth;
     gridSize = gridWidth*gridWidth*gridWidth;
 
     cellSize = _cellSize;
@@ -19,15 +26,16 @@ FluidSimulator::FluidSimulator(int n, int _cellSize, int _gridWidth)
 
     h = 0.1f;
     rho0 = 6378.0f;
+    invRho0 = 1.0f/rho0;
     epsR = 600.0f;
 
-    maxIterations = 4;
+    maxIterations = 3;
 
     RandomPositionStart();
 
     AllocCudaArrays();
 
-    printf("New fluid simulator with %d particles, cellSize %d, invCellSize %f, gridWidth %d, gridSize %d\n", 
+    printf("New fluid simulator with %d particles, cellSize %f, invCellSize %f, gridWidth %d, gridSize %d\n", 
             num_fluid_particles, cellSize, invCellSize, gridWidth, gridSize);
 
     InitGL();
@@ -121,9 +129,9 @@ void FluidSimulator::RandomPositionStart()
 {
     for (int i = 0; i < num_fluid_particles; i++)
     {
-        float xCoord = randomFloatRangef(0.0f, 0.5f);
-        float yCoord = randomFloatRangef(0.0f, 0.5f);
-        float zCoord = randomFloatRangef(0.0f, 0.5f);
+        float xCoord = randomFloatRangef(0.01f, 1.0f);
+        float yCoord = randomFloatRangef(0.01f, 0.5f);
+        float zCoord = randomFloatRangef(0.01f, 1.0f);
 
         x[i*4] = xCoord; x[i*4+1] = yCoord; x[i*4+2] = zCoord; x[i*4+3] = 0.0f;
         v[i*4] = 0.0f;   v[i*4+1] = 0.0f;   v[i*4+2] = 0.0f; v[i*4+3] = 0.0f;
@@ -131,15 +139,15 @@ void FluidSimulator::RandomPositionStart()
     }
 }
 
-__device__ int getCellNeighbors_2d(const int cell, const int gridWidth, int *oCellNeighbors)
+__device__ int getCellNeighbors_2d(const int cell, const int gridWidth, const int gridWidth2, const int invCellGW, int *oCellNeighbors)
 {
     int num_neighbors_found = 0;
     //neighboringCells.push_back(cell);  
     oCellNeighbors[num_neighbors_found] = cell;
     num_neighbors_found++;
-    int factor = cell/(gridWidth*gridWidth);
-    int gridUpperBound = gridWidth*gridWidth + factor*(gridWidth*gridWidth);
-    int gridLowerBound = factor*(gridWidth*gridWidth);
+    int factor = invCellGW;
+    int gridUpperBound = gridWidth2 + factor*(gridWidth2);
+    int gridLowerBound = factor*(gridWidth2);
 
     //printf("factor = %d/%d = %d\n", cell, gridWidth*gridWidth, factor);
     //printf("gub = %d\n", gridUpperBound);
@@ -211,12 +219,15 @@ __device__ int getCellNeighbors_2d(const int cell, const int gridWidth, int *oCe
     return num_neighbors_found;
 }
 
-__device__ int getCellNeighbors_3d(const int cell, const int gridWidth, const int gridSize, int *oCellNeighbors)
+__device__ int getCellNeighbors_3d(const int cell, const int gridWidth, const int gridWidth2, const int gridSize, int *oCellNeighbors)
 {
     //printf("looking for the 3d neighbors of cell %d\n", cell);
-    int neighbors1[9];
-    int neighbors2[9];
-    int neighbors3[9];
+    //int gridWidth2 = _gridWidth*gridWidth;
+    int invCellGW = cell/gridWidth2;
+
+    int neighbors1[9] = {0};
+    int neighbors2[9] = {0};
+    int neighbors3[9] = {0};
 
     for (int i = 0; i < 9; i++)
     {
@@ -225,7 +236,7 @@ __device__ int getCellNeighbors_3d(const int cell, const int gridWidth, const in
         neighbors3[i] = 0;
     }
 
-    int num_neighbors1 = getCellNeighbors_2d(cell, gridWidth, neighbors1);
+    int num_neighbors1 = getCellNeighbors_2d(cell, gridWidth, gridWidth2, invCellGW, neighbors1);
     for (int i = 0; i < num_neighbors1; i++)
     {
         oCellNeighbors[i] = neighbors1[i];
@@ -234,7 +245,7 @@ __device__ int getCellNeighbors_3d(const int cell, const int gridWidth, const in
     int num_neighbors3 = 0;
     if ((cell + gridWidth*gridWidth) < gridSize)
     {
-        num_neighbors2 = getCellNeighbors_2d(cell+gridWidth*gridWidth, gridWidth, neighbors2);
+        num_neighbors2 = getCellNeighbors_2d(cell+gridWidth2, gridWidth, gridWidth2, invCellGW, neighbors2);
         for (int i = 0; i < 9; i++)
         {
             oCellNeighbors[num_neighbors1+i] = neighbors2[i];
@@ -243,7 +254,7 @@ __device__ int getCellNeighbors_3d(const int cell, const int gridWidth, const in
 
     if ((cell - gridWidth*gridWidth) >= 0)
     {
-        num_neighbors3 = getCellNeighbors_2d(cell-gridWidth*gridWidth, gridWidth, neighbors3);
+        num_neighbors3 = getCellNeighbors_2d(cell-gridWidth2, gridWidth, gridWidth2, invCellGW, neighbors3);
         for (int i = 0; i < 9; i++)
         {
             oCellNeighbors[num_neighbors1+num_neighbors2+i] = neighbors3[i];
@@ -276,10 +287,14 @@ __global__ void computeSpatialHash(const int n, const float inv_cell_size, const
         return;
     }
     //hash position
-    int cellId = (int)ip[index*4]*inv_cell_size + ((int)ip[index*4+1]*inv_cell_size)*gridWidth + ((int)ip[index*4+2]*inv_cell_size)*gridWidth*gridWidth;
+    int cellId = (int)(ip[index*4]*inv_cell_size) + ((int)(ip[index*4+1]*inv_cell_size))*gridWidth + ((int)(ip[index*4+2]*inv_cell_size))*gridWidth*gridWidth;
     
-    oCellIds[index] = abs(cellId);
-    oParticleIds[index] = index;
+    if (cellId >= 0)
+    {
+        oCellIds[index] = cellId;
+        oParticleIds[index] = index;
+    }
+    
 }
 
 void thrustRadixSort(const int n, uint *ioCellIds, uint *ioParticleIds)
@@ -328,13 +343,15 @@ __global__ void explictEuler(int n, const float dt, float* ix, float* ov, float*
 
     float velo_damp = 0.99f;
     float g = -9.8f;
-    if (op[index*4+1] <= 0)
-    {
-        g = 0.0f;
-    } 
+    // if (op[index*4+1] <= 0)
+    // {
+    //     g = 0.0f;
+    // } 
     float f_ext_x = 0.0f;
     float f_ext_y = g;
     float f_ext_z = 0.0f;
+
+    //int i4 = index*4;
 
     ov[index*4]   = ov[index*4]   + dt*f_ext_x;
     ov[index*4+1] = ov[index*4+1] + dt*f_ext_y;
@@ -350,7 +367,7 @@ __global__ void explictEuler(int n, const float dt, float* ix, float* ov, float*
 
 }
 
-__global__ void computeDensity(int n, float h, int gridWidth, const float* ip, const uint* cellIds, const uint* cellStarts, const uint* cellEnds, const uint* particleIds, float* odensity)
+__global__ void computeDensity(int n, float h, int gridWidth, int gridWidth2, int gridSize, const float* ip, const uint* cellIds, const uint* cellStarts, const uint* cellEnds, const uint* particleIds, float* odensity)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
@@ -358,22 +375,23 @@ __global__ void computeDensity(int n, float h, int gridWidth, const float* ip, c
         return;
     }
 
-    float h8 = powf(h, 8);
     float h2 = h*h;
+    float h8 = h2*h2*h2*h2;
+
     float _pi = 3.141592f;
     int particleId = particleIds[index];
     int cell = cellIds[index];
 
-    int gs = gridWidth*gridWidth*gridWidth;
+    float coeff = (4.0f)/(_pi*h8);
 
-    int neighboringCells[27];
-    for (int i = 0; i < 27; i++)
-    {
-        neighboringCells[i] = 0;
-    }
+    float ipx = ip[particleId*4];
+    float ipy = ip[particleId*4+1];
+    float ipz = ip[particleId*4+2];
 
-    int num_neighbors_found = getCellNeighbors_3d(cell,  gridWidth, gs, neighboringCells);
+    int neighboringCells[27] = {0};
 
+    int num_neighbors_found = getCellNeighbors_3d(cell,  gridWidth, gridWidth*gridWidth, gridSize, neighboringCells);
+    
     float rho = 0.0f;
     for (int k = 0; k < num_neighbors_found; k++)
     {
@@ -398,14 +416,15 @@ __global__ void computeDensity(int n, float h, int gridWidth, const float* ip, c
                 break;
             }
 
-            float rx = ip[particleId*4] - ip[particleId_i*4];
-            float ry = ip[particleId*4+1] - ip[particleId_i*4+1];
-            float rz = ip[particleId*4+2] - ip[particleId_i*4+2];
+            float rx = ipx - ip[particleId_i*4];
+            float ry = ipy - ip[particleId_i*4+1];
+            float rz = ipz - ip[particleId_i*4+2];
 
             float rd2 = rx*rx + ry*ry + rz*rz;
             if (rd2 < h2)
             {
-                float W = (4.0f)/(_pi*h8)*powf((h2 - rd2),3.0f);
+                //float W = coeff*powf((h2 - rd2),3.0f);
+                float W = coeff*(h2 - rd2)*(h2 - rd2)*(h2 - rd2);
                 rho += W;
             }
         }
@@ -415,7 +434,7 @@ __global__ void computeDensity(int n, float h, int gridWidth, const float* ip, c
 
 }
 
-__global__ void computeLambda(int n, float h, int gridWidth, float rho0, float epsR, const float* ip, const uint* cellIds, const uint* cellStarts, const uint* cellEnds, const uint* particleIds, const float* idensity, float* olambda)
+__global__ void computeLambda(int n, float h, int gridWidth, int gridWidth2, int gridSize, float invRho0, float epsR, const float* ip, const uint* cellIds, const uint* cellStarts, const uint* cellEnds, const uint* particleIds, const float* idensity, float* olambda)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
@@ -423,23 +442,31 @@ __global__ void computeLambda(int n, float h, int gridWidth, float rho0, float e
         return;
     }
 
-    float h8 = powf(h, 8);
-    float h2 = h*h;
-    float _pi = 3.141592f;
+    // float h8 = powf(h, 8);
+    // float h6 = powf(h, 6);
+    //float h2 = h*h;
+    float h2 = 0.01f;
+    //float h6 = h2*h2*h2;
+    float h6 = 0.000001f;
+    float h8 = 1.0e-8;
+
+    //float _pi = 3.141592f;
     int particleId = particleIds[index];
     int cell = cellIds[index];
-    int gs = gridWidth*gridWidth*gridWidth;
 
+    float ipx = ip[particleId*4];
+    float ipy = ip[particleId*4+1];
+    float ipz = ip[particleId*4+2];
 
-    float C_i = (idensity[particleId]/rho0) - 1.0f;
+    float C_i = (idensity[particleId]*invRho0) - 1.0f;
+    
+    //float coeff = (45.0f/((float)_pi*h6))*invRho0;
+    float coeff = 2245.84f;
 
-    int neighboringCells[27];
-    for (int i = 0; i < 27; i++)
-    {
-        neighboringCells[i] = 0;
-    }
+    int neighboringCells[27] = {0};
 
-    int num_neighbors_found = getCellNeighbors_3d(cell, gridWidth, gs, neighboringCells);
+    int num_neighbors_found = getCellNeighbors_3d(cell, gridWidth, gridWidth*gridWidth, gridSize, neighboringCells);
+    //int num_neighbors_found = 27;
 
     float sum_grad_C_i = 0.0f;
     for (int k = 0; k < num_neighbors_found; k++)
@@ -464,21 +491,18 @@ __global__ void computeLambda(int n, float h, int gridWidth, float rho0, float e
                 break;
             }
 
-            float rx = ip[particleId*4] - ip[particleId_i*4];
-            float ry = ip[particleId*4+1] - ip[particleId_i*4+1];
-            float rz = ip[particleId*4+2] - ip[particleId_i*4+2];
+            float rx = ipx - ip[particleId_i*4];
+            float ry = ipy - ip[particleId_i*4+1];
+            float rz = ipz - ip[particleId_i*4+2];
 
             float rd2 = rx*rx + ry*ry + rz*rz;
-            float rd = sqrtf(rd2);
             if (rd2 < h2)
             {
-                float gradW_x = -(45.0f/((float)_pi*h2*h2*h2))*((h-rd)*(h-rd)*rx);
-                float gradW_y = -(45.0f/((float)_pi*h2*h2*h2))*((h-rd)*(h-rd)*ry);
-                float gradW_z = -(45.0f/((float)_pi*h2*h2*h2))*((h-rd)*(h-rd)*rz);
-
-                gradW_x /= rho0;
-                gradW_y /= rho0;
-                gradW_z /= rho0;
+                float rd = sqrtf(rd2);
+                float dist2 = (h-rd)*(h-rd);
+                float gradW_x = -coeff*(dist2*rx);
+                float gradW_y = -coeff*(dist2*ry);
+                float gradW_z = -coeff*(dist2*rz);
 
                 sum_grad_C_i += gradW_x*gradW_x + gradW_y*gradW_y + gradW_z*gradW_z;
             }
@@ -489,7 +513,7 @@ __global__ void computeLambda(int n, float h, int gridWidth, float rho0, float e
 
 }
 
-__global__ void projectDensityConstraint(int n, float h, int gridWidth, float rho0, float* op, const uint* cellIds, const uint* cellStarts, const uint* cellEnds, const uint* particleIds, const float* idensity, const float* ilambda)
+__global__ void projectDensityConstraint(int n, float h, int gridWidth, int gridSize, int gridWidth2, float invRho0, float* op, const uint* cellIds, const uint* cellStarts, const uint* cellEnds, const uint* particleIds, const float* idensity, const float* ilambda)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
@@ -498,21 +522,35 @@ __global__ void projectDensityConstraint(int n, float h, int gridWidth, float rh
     }
 
     float h2 = h*h;
+    float h6 = h2*h2*h2;
+
     float _pi = 3.141592f;
     int particleId = particleIds[index];
+    int pidx = particleId*4;
+
+    float wCoeff = (15.0f/(_pi*h6));
+    float coeff = (45.0f/((float)_pi*h6));
+    
+    //float W_dq = wCoeff*powf((0.2f),3.0f);
+    //float W_dq = wCoeff*0.008f;
+    float s_corr = 0.0001f;
+
     int cell = cellIds[index];
 
-    int gs = gridWidth*gridWidth*gridWidth;
+    float lambda = ilambda[particleId];
+    float px = op[pidx];
+    float py = op[pidx+1];
+    float pz = op[pidx+2];
 
+    int neighboringCells[27] = {0};
 
-    int neighboringCells[27];
+    // for (int i = 0; i < 27; i++)
+    // {
+    //     neighboringCells[i] = i;
+    // }
 
-    for (int i = 0; i < 27; i++)
-    {
-        neighboringCells[i] = 0;
-    }
-
-    int num_neighbors_found = getCellNeighbors_3d(cell, gridWidth, gs, neighboringCells);
+    int num_neighbors_found = getCellNeighbors_3d(cell, gridWidth, gridWidth*gridWidth, gridSize, neighboringCells);
+    //int num_neighbors_found = 1;
 
     float constraint_sum_x = 0.0f; float constraint_sum_y = 0.0f; float constraint_sum_z = 0.0f;  
     for (int k = 0; k < num_neighbors_found; k++)
@@ -532,38 +570,42 @@ __global__ void projectDensityConstraint(int n, float h, int gridWidth, float rh
         {
             int cellId_i = cellIds[i];
             int particleId_i = particleIds[i];
+            int pidx_i = particleId_i*4;
             if (cellId_i != nCell)
             {
                 //we've reached the end of the cell
                 break;
             }
 
-            float rx = op[particleId*4] - op[particleId_i*4];
-            float ry = op[particleId*4+1] - op[particleId_i*4+1];
-            float rz = op[particleId*4+2] - op[particleId_i*4+2];
+            float rx = px - op[pidx_i];
+            float ry = py - op[pidx_i+1];
+            float rz = pz - op[pidx_i+2];
 
             float rd2 = rx*rx + ry*ry + rz*rz;
-            float rd = sqrtf(rd2);
             if (rd2 < h2)
             {
-                float W_s = (15.0f/(_pi*h2*h2*h2))*powf((h-rd),3.0f);
-                float W_dq = (15.0f/(_pi*h2*h2*h2))*powf((0.2f),3.0f);
-                float s_corr = 0.1*h*powf(W_s/W_dq, 4); 
+                float rd = sqrtf(rd2);
+                //float W_s = wCoeff*powf((h-rd),3.0f);
+                //float W_s = wCoeff*(h-rd)*(h-rd)*(h-rd);
+
+                float dist2 = (h-rd)*(h-rd);
             
-                float gradW_x = -(45.0f/((float)M_PI*h2*h2*h2))*((h-rd)*(h-rd)*rx);
-                float gradW_y = -(45.0f/((float)M_PI*h2*h2*h2))*((h-rd)*(h-rd)*ry);
-                float gradW_z = -(45.0f/((float)M_PI*h2*h2*h2))*((h-rd)*(h-rd)*rz);
+                float gradW_x = -coeff*(dist2*rx);
+                float gradW_y = -coeff*(dist2*ry);
+                float gradW_z = -coeff*(dist2*rz);
+
+                float lambda_sum = lambda + ilambda[particleId_i] + s_corr;
                 
-                constraint_sum_x += (ilambda[particleId] + ilambda[particleId_i] + s_corr) * gradW_x;
-                constraint_sum_y += (ilambda[particleId] + ilambda[particleId_i] + s_corr) * gradW_y;
-                constraint_sum_z += (ilambda[particleId] + ilambda[particleId_i] + s_corr) * gradW_z;
+                constraint_sum_x += lambda_sum * gradW_x;
+                constraint_sum_y += lambda_sum * gradW_y;
+                constraint_sum_z += lambda_sum * gradW_z;
             }
         }
     }
 
-    op[particleId*4] += constraint_sum_x/rho0;
-    op[particleId*4+1] += constraint_sum_y/rho0;
-    op[particleId*4+2] += constraint_sum_z/rho0;
+    op[pidx] += constraint_sum_x*invRho0;
+    op[pidx+1] += constraint_sum_y*invRho0;
+    op[pidx+2] += constraint_sum_z*invRho0;
 
 }
 
@@ -575,19 +617,182 @@ __global__ void updatePositions(int n, float dt, const float *ip, float *ov, flo
         return;
     }
 
+
     ov[index*4] = (ip[index*4]-ox[index*4])/dt;
     ov[index*4+1] = (ip[index*4+1]-ox[index*4+1])/dt;
     ov[index*4+2] = (ip[index*4+2]-ox[index*4+2])/dt;
-    if (ip[index*4+1] <= 0)
-    {
-        ov[index*4] *= -0.3f;
-        ov[index*4+1] *= -0.3f;
-        ov[index*4+2] *= -0.3f;
-    }
-
+    
     ox[index*4] = ip[index*4];
     ox[index*4+1] = ip[index*4+1];
     ox[index*4+2] = ip[index*4+2];
+
+    const float collDamp = 0.5f;
+    float wall = 1.0f;
+    
+    if (ox[index*4+1] <= 0.0f && ov[index*4+1] != 0.0f)
+    {
+        float tColl = (ox[index*4+1]-0.0f) / ov[index*4+1];
+
+        ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
+        ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
+        ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+
+        //ox[index*4] = 2.0f*0.0f-ox[index*4];
+        ox[index*4+1] = 2.0f*0.0f-ox[index*4+1];
+
+        ov[index*4+1] *= -1.0f;
+
+        ov[index*4] *= collDamp;
+        ov[index*4+1] *= collDamp;
+        ov[index*4+2] *= collDamp;
+    }
+    if (ox[index*4+1] >= wall && ov[index*4+1] != 0.0f)
+    {
+        float tColl = (ox[index*4+1]-wall) / ov[index*4+1];
+
+        ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
+        ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
+        ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+
+        //ox[index*4] = 2.0f*0.0f-ox[index*4];
+        ox[index*4+1] = 2.0f*wall-ox[index*4+1];
+
+        ov[index*4+1] *= -1.0f;
+
+        ov[index*4] *= collDamp;
+        ov[index*4+1] *= collDamp;
+        ov[index*4+2] *= collDamp;
+    }
+
+    if (ox[index*4] <= 0.0f && ov[index*4] != 0.0f)
+    {
+        float tColl = (ox[index*4]-0.0f) / ov[index*4];
+
+        ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
+        ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
+        ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+
+        //ox[index*4] = 2.0f*0.0f-ox[index*4];
+        ox[index*4] = 2.0f*0.0f-ox[index*4];
+
+        ov[index*4] *= -1.0f;
+
+        ov[index*4] *= collDamp;
+        ov[index*4+1] *= collDamp;
+        ov[index*4+2] *= collDamp;
+    }
+
+    if (ox[index*4+2] <= 0.0f && ov[index*4+2] != 0.0f)
+    {
+        float tColl = (ox[index*4+2]-0.0f) / ov[index*4+2];
+
+        ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
+        ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
+        ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+
+        //ox[index*4] = 2.0f*0.0f-ox[index*4];
+        ox[index*4+2] = 2.0f*0.0f-ox[index*4+2];
+        
+        ov[index*4+2] *= -1.0f;
+
+        ov[index*4] *= collDamp;
+        ov[index*4+1] *= collDamp;
+        ov[index*4+2] *= collDamp;
+    }
+
+    if (ox[index*4] > wall && ov[index*4] != 0.0f)
+    {
+        float tColl = (ox[index*4]-wall) / ov[index*4];
+
+        ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
+        ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
+        ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+
+        //ox[index*4] = 2.0f*0.0f-ox[index*4];
+        ox[index*4] = 2.0f*wall-ox[index*4];
+
+        ov[index*4] *= -1.0f;
+
+        ov[index*4] *= collDamp;
+        ov[index*4+1] *= collDamp;
+        ov[index*4+2] *= collDamp;
+    }
+
+    if (ox[index*4+2] > wall && ov[index*4+2] != 0.0f)
+    {
+        float tColl = (ox[index*4+2]-wall) / ov[index*4+2];
+
+        ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
+        ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
+        ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+
+        //ox[index*4] = 2.0f*0.0f-ox[index*4];
+        ox[index*4+2] = 2.0f*wall-ox[index*4+2];
+
+        ov[index*4+2] *= -1.0f;
+
+        ov[index*4] *= collDamp;
+        ov[index*4+1] *= collDamp;
+        ov[index*4+2] *= collDamp;
+    }
+
+
+    // if (ox[index*4] <= 0.0f)
+    // {
+    //     float tColl = (ox[index*4]-0.0f)/ov[index*4];
+    //     ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
+    //     ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
+    //     ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+
+    //     ox[index*4] = 2.0f*0.0f-ox[index*4];
+
+    //     ov[index*4] *= -1.0f;
+    //     ov[index*4+1] *= -1.0f;
+    //     ov[index*4+2] *= -1.0f;
+    // }
+
+    // if (ox[index*4] >= wall)
+    // {
+    //     float tColl = (ox[index*4]-0.0f)/ov[index*4];
+    //     ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
+    //     ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
+    //     ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+
+    //     ox[index*4] = 2.0f*0.0f-ox[index*4];
+
+    //     ov[index*4] *= -1.0f;
+    //     ov[index*4+1] *= -1.0f;
+    //     ov[index*4+2] *= -1.0f;
+    // }
+
+    // if (ox[index*4+2] >= wall)
+    // {
+    //     float tColl = (ox[index*4+2]-0.0f)/ov[index*4]+2;
+    //     ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
+    //     ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
+    //     ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+
+    //     ox[index*4+2] = 2.0f*0.0f-ox[index*4];
+
+    //     ov[index*4] *= -1.0f;
+    //     ov[index*4+1] *= -1.0f;
+    //     ov[index*4+2] *= -1.0f;
+    // }
+
+    // if (ox[index*4] <= 0.0f)
+    // {
+    //     float tColl = (ox[index*4+2]-0.0f)/ov[index*4+2];
+    //     ox[index*4] -= ov[index*4]*(1-collDamp)*tColl;
+    //     ox[index*4+1] -= ov[index*4+1]*(1-collDamp)*tColl;
+    //     ox[index*4+2] -= ov[index*4+2]*(1-collDamp)*tColl;
+
+    //     ox[index*4+2] = 2.0f*0.0f-ox[index*4];
+
+    //     ov[index*4] *= -1.0f;
+    //     ov[index*4+1] *= -1.0f;
+    //     ov[index*4+2] *= -1.0f;
+    // }
+
 
 }
 
@@ -600,21 +805,37 @@ void FluidSimulator::stepSimulation(const float dt)
     dim3 threadsPerBlock(numThreads);
     dim3 blocksPerGrid((num_fluid_particles+numThreads-1)/numThreads);
 
+    //timer().startGpuTimer();
     //call explict euler per particle. Modifies dev_v and dev_p
     explictEuler<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dt, dev_x, dev_v, dev_p);
     checkCUDAError("explicit euler failed");
+    //timer().endGpuTimer();
+    //float time = timer().getGpuElapsedTimeForPreviousOperation();
+    //printf("time for explict Euler = %f\n", time);
 
     // //compute spatial hashes per particle. Modifies dev_CellIds and dev_particleIds
+    //timer().startGpuTimer();
     computeSpatialHash<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, invCellSize, gridWidth, dev_p, dev_cellIds, dev_particleIds);
     checkCUDAError("computeSpatialHash failed");
+    //timer().endGpuTimer();
+    //float time1 = timer().getGpuElapsedTimeForPreviousOperation();
+    //printf("time for compute spatial = %f\n", time1);
 
     // //sort by cellId
+    //timer().startGpuTimer();
     thrustRadixSort(num_fluid_particles, dev_cellIds, dev_particleIds);
     checkCUDAError("thrust error");
+    //timer().endGpuTimer();
+    //float time2 = timer().getGpuElapsedTimeForPreviousOperation();
+    //printf("time for thrust sort = %f\n", time2);
 
+    //timer().startGpuTimer();
     // //get starting index of each cellId in the cellIds and particleIds parallel arrays and store in dev_cellStarts.
     findCellsInArray<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, gridWidth, dev_cellIds, dev_cellStarts, dev_cellEnds);
     checkCUDAError("findCellsInArray failed");
+    //timer().endGpuTimer();
+    //float time3 = timer().getGpuElapsedTimeForPreviousOperation();
+    //printf("time for find cells in array = %f\n", time3);
 
     // uint* cellIds = new uint[num_fluid_particles];
     // uint* particleIds = new uint[num_fluid_particles];
@@ -623,7 +844,7 @@ void FluidSimulator::stepSimulation(const float dt)
 
     // cudaMemcpy(cellIds, dev_cellIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
     // checkCUDAError("memcpy failed");
-    // cudaMemcpy(particleIds, dev_particleIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(particleIds, dev_particlgridWidth*gridWidtheIds, num_fluid_particles*sizeof(uint), cudaMemcpyDeviceToHost);
     // checkCUDAError("memcpy failed");
     // cudaMemcpy(cellStarts, dev_cellStarts, gridSize*sizeof(uint), cudaMemcpyDeviceToHost);
     // checkCUDAError("memcpy failed");
@@ -633,18 +854,32 @@ void FluidSimulator::stepSimulation(const float dt)
     int num_iterations = 0;
     while (num_iterations < maxIterations)
     {
-        computeDensity<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, dev_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_particleIds, dev_density);
+        //timer().startGpuTimer();
+        computeDensity<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, dev_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_particleIds, dev_density);
         checkCUDAError("computeDensity failed");
-
-        computeLambda<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, rho0, epsR, dev_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_particleIds, dev_density, dev_lambda);
+        //timer().endGpuTimer();
+        //float time4 = timer().getGpuElapsedTimeForPreviousOperation();
+        //printf("it %d computeDensity = %f\n", num_iterations, time4);
+        
+        //timer().startGpuTimer();
+        computeLambda<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, invRho0, epsR, dev_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_particleIds, dev_density, dev_lambda);
         checkCUDAError("computeLambda failed");
+        //timer().endGpuTimer();
+        //float time5 = timer().getGpuElapsedTimeForPreviousOperation();
+        //printf("it %d computeLambda = %f\n", num_iterations, time5);
 
-        projectDensityConstraint<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, rho0, dev_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_particleIds, dev_density, dev_lambda);
+        //timer().startGpuTimer();
+        projectDensityConstraint<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, invRho0, dev_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_particleIds, dev_density, dev_lambda);
         checkCUDAError("projectDensityConstraint failed");
+        //timer().endGpuTimer();
+        //float time6 = timer().getGpuElapsedTimeForPreviousOperation();
+        //printf("it %d projectDensityConstraint = %f\n", num_iterations, time6);
 
         cudaDeviceSynchronize();
         num_iterations++;
     }
+    
+
 //int getCellNeighbors_3d(const int cell, const int gridWidth, const int gridSize, int *oCellNeighbors)
     // int cn[27];
     // for (int i = 0; i < 27; i++)

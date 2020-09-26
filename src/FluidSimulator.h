@@ -37,14 +37,16 @@ private:
 
     float h;
     float rho0;
+    float invRho0;
     float epsR;
 
     int maxIterations;
 
     //hashing
-    int cellSize;
+    float cellSize;
     float invCellSize;
     int gridWidth;
+    int gridWidth2;
     int gridSize;
 
     //rendering
@@ -56,7 +58,7 @@ private:
 
 
 public:
-    FluidSimulator(int n, int _cellSize, int _gridWidth);
+    FluidSimulator(int n, float _cellSize, int _gridWidth);
     ~FluidSimulator(){};
 
     void stepSimulation(const float dt);
