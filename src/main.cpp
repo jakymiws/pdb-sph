@@ -17,12 +17,6 @@
 //TODO: delete reference to this in makefile
 #include "FluidSimulator.h"
 
-//TODO: 
-//1.Move sim to cuda
-//2. Move neighbor finding to cuda
-    //2a. Will need to figure out how to get cuda and opengl to work together - there was a function for it I saw on cuda particles I think
-//3. Test 3D
-
 struct IndirectRenderParams
 {
     GLuint count;
@@ -71,7 +65,7 @@ int maxIterations = 4;
 const float gravity_accel = -9.8f;
 const float velo_damp = 0.99f;
 
-float dt = 0.006f;
+float dt = 0.0086f;
 
 float mass = 1.0f;
 float wMass = 1.0f/mass;
@@ -471,7 +465,7 @@ int main(void)
 
     glewInit();
 
-    FluidSimulator *fs = new FluidSimulator(20000, 0.08f, 80);
+    FluidSimulator *fs = new FluidSimulator(20000, 0.2f, 20);
     //while true:
     // for (int i = 0; i < 3; i++)
     // {

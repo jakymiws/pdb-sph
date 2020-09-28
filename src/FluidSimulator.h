@@ -7,6 +7,9 @@
 #include<cuda_runtime.h>
 #include <cuda_gl_interop.h>
 
+#include <glm/glm.hpp>
+
+
 class FluidSimulator
 {
 private:
@@ -21,13 +24,16 @@ private:
     int num_fluid_particles;
 
     float* x;
-    float* p;
-    float* v;
+    glm::vec3* p;
+    glm::vec3* v;
 
-    float *dev_v;
-    float *dev_p;
+    glm::vec3 *dev_v;
+    glm::vec3 *dev_p;
+    glm::vec3 *dev_sorted_p;
+    glm::vec3 *dev_sorted_v;
+    glm::vec3 *dev_p2;
     //float *dev_x;
-    float *dev_density;
+    //float *dev_density;
     float *dev_lambda;
 
     uint *dev_cellIds;
