@@ -31,7 +31,9 @@ private:
     glm::vec3 *dev_p;
     glm::vec3 *dev_sorted_p;
     glm::vec3 *dev_sorted_v;
+    glm::vec3 *dev_p_lastFrame_sorted;
     glm::vec3 *dev_p2;
+    glm::vec3 *dev_p_lastFrame;
     //float *dev_x;
     //float *dev_density;
     float *dev_lambda;
