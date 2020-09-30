@@ -14,7 +14,6 @@
 #include "LoadShaders.h"
 #include "camera.h"
 
-//TODO: delete reference to this in makefile
 #include "FluidSimulator.h"
 
 struct IndirectRenderParams
@@ -465,7 +464,7 @@ int main(void)
 
     glewInit();
 
-    FluidSimulator *fs = new FluidSimulator(20000, 0.2f, 20);
+    FluidSimulator *fs = new FluidSimulator(80000, 0.2f, 40);
     //while true:
     // for (int i = 0; i < 3; i++)
     // {

@@ -5,14 +5,16 @@
 
 #include <glm/glm.hpp>
 
+#ifndef imax
+#define imax( a, b ) ( ((a) > (b)) ? (a) : (b) )
+#endif
+
+#ifndef imin
+#define imin( a, b ) ( ((a) < (b)) ? (a) : (b) )
+#endif
+
 thrust::device_ptr<uint> dev_thrust_cellIds;
 thrust::device_ptr<uint> dev_thrust_particleIds;
-
-PerformanceTimer& timer()
-        {
-            static PerformanceTimer timer;
-            return timer;
-        }
 
 FluidSimulator::FluidSimulator(int n, float _cellSize, int _gridWidth)
 {
@@ -44,7 +46,7 @@ FluidSimulator::FluidSimulator(int n, float _cellSize, int _gridWidth)
             num_fluid_particles, cellSize, invCellSize, gridWidth, gridSize);
 
     InitGL();
-    printf("openGL initialized in fs with glVBO = %d\n", glVBO);
+    printf("openGL initialized in fluid simulator with glVBO = %d\n", glVBO);
 }
 
 void FluidSimulator::AllocCudaArrays()
@@ -63,19 +65,12 @@ void FluidSimulator::AllocCudaArrays()
     checkCUDAError("malloc dev_p failed");
     cudaMalloc((void**)&dev_p_lastFrame_sorted, num_fluid_particles*sizeof(glm::vec3));
     checkCUDAError("malloc dev_p failed");
-    // cudaMalloc((void**)&dev_x, num_fluid_particles*4*sizeof(float));
-    // checkCUDAError("malloc dev_x failed");
 
-    // cudaMalloc((void**)&dev_density, num_fluid_particles*sizeof(float));
-    // checkCUDAError("malloc dev_p failed");
     cudaMalloc((void**)&dev_lambda, num_fluid_particles*sizeof(float));
     checkCUDAError("malloc dev_lamba failed");
     
     cudaMemcpy(dev_v, v, num_fluid_particles*sizeof(glm::vec3), cudaMemcpyHostToDevice);
     checkCUDAError("memcpy v-->dev_v failed");
-
-    // cudaMemcpy(dev_p, x, num_fluid_particles*sizeof(glm::vec3), cudaMemcpyHostToDevice);
-    // checkCUDAError("memcpy x-->dev_p failed");
 
     cudaMalloc((void**)&dev_cellIds, num_fluid_particles*sizeof(uint));
     checkCUDAError("malloc failed");
@@ -84,6 +79,8 @@ void FluidSimulator::AllocCudaArrays()
     cudaMalloc((void**)&dev_cellStarts, gridSize*sizeof(uint));
     checkCUDAError("malloc failed");
     cudaMalloc((void**)&dev_cellEnds, gridSize*sizeof(uint));
+    checkCUDAError("malloc failed");
+    cudaMalloc((void**)&dev_cellBounds, gridSize*sizeof(uint2));
     checkCUDAError("malloc failed");
 
     dev_thrust_cellIds = thrust::device_ptr<uint>(dev_cellIds);
@@ -131,8 +128,7 @@ void FluidSimulator::InitGL()
     glBindBuffer(GL_ARRAY_BUFFER, glVBO);
     glBufferData(GL_ARRAY_BUFFER, num_fluid_particles*3*sizeof(float), 0, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
-    //glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0);
-    //glEnableVertexAttribArray(0);
+
     //register VBO With Cuda
     registerVBO_WithCUDA(glVBO, &cudaVBO_resource);
 
@@ -148,144 +144,15 @@ void FluidSimulator::RandomPositionStart()
 {
     for (int i = 0; i < num_fluid_particles; i++)
     {
-        float xCoord = randomFloatRangef(0.01f, 1.0f);
-        float yCoord = randomFloatRangef(0.01f, 1.00f);
-        float zCoord = randomFloatRangef(0.01f, 1.00f);
+        float xCoord = randomFloatRangef(0.5f, 1.5f);
+        float yCoord = randomFloatRangef(0.01f, 0.5f);
+        float zCoord = randomFloatRangef(0.5f, 1.5f);
 
         x[i*3] = xCoord; x[i*3+1] = yCoord; x[i*3+2] = zCoord;
         //v[i*3] = 0.0f;   v[i*3+1] = 0.0f;   v[i*3+2] = 0.0f; 
         v[i] = glm::vec3(0.0f);
     }
 }
-
-__device__ int getCellNeighbors_2d(const int cell, const int gridWidth, const int gridWidth2, const int invCellGW, int *oCellNeighbors)
-{
-    int num_neighbors_found = 0;
-    
-    int factor = invCellGW;
-    int gridUpperBound = gridWidth2 + factor*(gridWidth2);
-    int gridLowerBound = factor*(gridWidth2);
-
-    if (((cell - 1) % gridWidth) < (cell % gridWidth) && (cell-1)>=0)
-    {
-        
-        if (cell-1-gridWidth >= gridLowerBound)
-        {
-            oCellNeighbors[num_neighbors_found] = cell-1-gridWidth;
-            num_neighbors_found++;
-        }
-    }
-
-    if (cell-gridWidth >= gridLowerBound)
-    {
-        oCellNeighbors[num_neighbors_found] = cell-gridWidth;
-        num_neighbors_found++;
-    }
-
-    if (((cell + 1) % gridWidth) > (cell % gridWidth) && (cell+1) < gridUpperBound)
-    {
-        if (cell+1-gridWidth >= gridLowerBound)
-        {
-            oCellNeighbors[num_neighbors_found] = cell+1-gridWidth;
-            num_neighbors_found++;
-        }
-    }
-
-    if (((cell - 1) % gridWidth) < (cell % gridWidth) && (cell-1)>=0)
-    {
-        oCellNeighbors[num_neighbors_found] = cell-1;
-        num_neighbors_found++;
-
-    }
-    oCellNeighbors[num_neighbors_found] = cell;
-
-    num_neighbors_found++;
-    if (((cell + 1) % gridWidth) > (cell % gridWidth) && (cell+1) < gridUpperBound)
-    {
-        oCellNeighbors[num_neighbors_found] = cell+1;
-        num_neighbors_found++;
-
-    }
-
-    if (((cell - 1) % gridWidth) < (cell % gridWidth) && (cell-1)>=0)
-    {
-        if (cell-1+gridWidth < gridUpperBound)
-        {
-            oCellNeighbors[num_neighbors_found] = cell-1+gridWidth;
-            num_neighbors_found++;
-        }
-    }
-
-    if (cell+gridWidth < gridUpperBound)
-    {  
-        oCellNeighbors[num_neighbors_found] = cell+gridWidth;
-        num_neighbors_found++;
-    } 
-
-    if (((cell + 1) % gridWidth) > (cell % gridWidth) && (cell+1) < gridUpperBound)
-    {
-        // oCellNeighbors[num_neighbors_found] = cell+1;
-        // num_neighbors_found++;
-        if (cell+1+gridWidth < gridUpperBound)
-        {
-            oCellNeighbors[num_neighbors_found] = cell+1+gridWidth;
-            num_neighbors_found++;
-        }
-
-    }
-
-    return num_neighbors_found;
-}
-
-__device__ int getCellNeighbors_3d(const int cell, const int gridWidth, const int gridWidth2, const int gridSize, int *oCellNeighbors)
-{
-    //printf("looking for the 3d neighbors of cell %d\n", cell);
-    //int gridWidth2 = _gridWidth*gridWidth;
-    int invCellGW = cell/gridWidth2;
-
-    int neighbors1[9] = {0};
-    int neighbors2[9] = {0};
-    int neighbors3[9] = {0};
-
-    for (int i = 0; i < 9; i++)
-    {
-        neighbors1[i] = 0;
-        neighbors2[i] = 0;
-        neighbors3[i] = 0;
-    }
-
-    
-    int num_neighbors2 = 0;
-    int num_neighbors3 = 0;
-
-    if ((cell - gridWidth*gridWidth) >= 0)
-    {
-        num_neighbors3 = getCellNeighbors_2d(cell-gridWidth2, gridWidth, gridWidth2, invCellGW, neighbors3);
-        for (int i = 0; i < 9; i++)
-        {
-            oCellNeighbors[i] = neighbors3[i];
-        }
-    }
-
-    int num_neighbors1 = getCellNeighbors_2d(cell, gridWidth, gridWidth2, invCellGW, neighbors1);
-    for (int i = 0; i < num_neighbors1; i++)
-    {
-        oCellNeighbors[num_neighbors3+i] = neighbors1[i];
-    }
-
-    if ((cell + gridWidth*gridWidth) < gridSize)
-    {
-        num_neighbors2 = getCellNeighbors_2d(cell+gridWidth2, gridWidth, gridWidth2, invCellGW, neighbors2);
-        for (int i = 0; i < 9; i++)
-        {
-            oCellNeighbors[num_neighbors1+num_neighbors3+i] = neighbors2[i];
-        }
-    }
-
-    return num_neighbors1 + num_neighbors2 + num_neighbors3;
-
-}
-
 
 __global__ void computeSpatialHash(const int n, const float inv_cell_size, const int gridWidth, const glm::vec3* ip, uint *oCellIds, uint *oParticleIds)
 {
@@ -302,16 +169,10 @@ __global__ void computeSpatialHash(const int n, const float inv_cell_size, const
         oCellIds[index] = cellId;
         oParticleIds[index] = index;
     }
-    
 }
 
-void thrustRadixSort(const int n, uint *ioCellIds, uint *ioParticleIds)
-{
-    thrust::sort_by_key(thrust::device_ptr<uint>(ioCellIds), 
-                        thrust::device_ptr<uint>(ioCellIds + n), thrust::device_ptr<uint>(ioParticleIds));
-}
-
-__global__ void findCellsInArray(const int n, const int gridWidth, const uint* iCellIds, uint* cellStarts, uint* cellEnds)
+//Populates the cellBounds array with the index of the positions in each grid cell for easier access
+__global__ void findCellsInArray(const int n, const int gridWidth, const uint* iCellIds, uint* cellStarts, uint* cellEnds, uint2* cellBounds)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
@@ -322,11 +183,14 @@ __global__ void findCellsInArray(const int n, const int gridWidth, const uint* i
     if (index == 0)
     {
         cellStarts[iCellIds[index]] = 0;
+        cellBounds[iCellIds[index]].x = 0;
         
     } else {
         if (iCellIds[index] != iCellIds[index-1])
         {
             cellStarts[iCellIds[index]] = index; 
+            cellBounds[iCellIds[index]].x = index;
+            
         }
     }
 
@@ -335,9 +199,12 @@ __global__ void findCellsInArray(const int n, const int gridWidth, const uint* i
         if(iCellIds[index] != iCellIds[index+1])
         {
             cellEnds[iCellIds[index]] = index;
+            cellBounds[iCellIds[index]].y = index;
+
         }
     } else {
         cellEnds[iCellIds[index]] = index;
+        cellBounds[iCellIds[index]].y = index;
     }
 }
 
@@ -348,40 +215,28 @@ __global__ void explictEuler(int n, const float dt, float* ix, glm::vec3* ov, gl
     {
         return;
     }   
-    //store last frame for the update function at the end.
+    //store last frame for the update function at the end of the simulation step.
     lastFrameHolder[index] = glm::vec3(ix[index*3], ix[index*3+1], ix[index*3+2]);
 
     float velo_damp = 0.99f;
     float g = -9.8f;
-    // if (op[index*4+1] <= 0)
-    // {
-    //     g = 0.0f;
-    // } 
+
     float f_ext_x = 0.0f;
     float f_ext_y = g;
     float f_ext_z = 0.0f;
 
-    //int i4 = index*4;
-
     ov[index] += dt*glm::vec3(0.0f, g, 0.0f);
     ov[index] *= velo_damp;
-    // ov[index*3]   = ov[index*3]   + dt*f_ext_x;
-    // ov[index*3+1] = ov[index*3+1] + dt*f_ext_y;
-    // ov[index*3+2] = ov[index*3+2] + dt*f_ext_z;
-
-    // ov[index*3] *= velo_damp;
-    // ov[index*3+1] *= velo_damp;
-    // ov[index*3+2] *= velo_damp;
 
     op[index] = glm::vec3(ix[index*3], ix[index*3+1], ix[index*3+2]) + dt*ov[index];
 
-    // op[index*3]   = ix[index*3]   + dt*ov[index*3];
-    // op[index*3+1] = ix[index*3+1] + dt*ov[index*3+1];
-    // op[index*3+2] = ix[index*3+2] + dt*ov[index*3+2];
-
+}
+__device__ glm::ivec3 get3DGridId(const float invCellSize, const glm::vec3 p)
+{
+    return glm::ivec3((int)(p.x*invCellSize), (int)(p.y*invCellSize), (int)(p.z*invCellSize));
 }
 
-__global__ void computeDensity(int n, float h, int gridWidth, int gridWidth2, int gridSize, const glm::vec3* ip, const uint* cellIds, const uint* cellStarts, const uint* cellEnds, float* olambda)
+__global__ void computeDensity_opt(int n, float h, int gridWidth, int gridWidth2, int gridSize, const glm::vec3* ip, const uint2* cellBounds, float* olambda)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
@@ -393,82 +248,59 @@ __global__ void computeDensity(int n, float h, int gridWidth, int gridWidth2, in
     float h8 = h2*h2*h2*h2;
     float h6 = h2*h2*h2;
 
-
     float _pi = 3.141592f;
-    //int particleId = particleIds[index];
-    int cell = cellIds[index];
 
     float coeff = (4.0f)/(_pi*h8);
     float invRho0 = 1.0f/6378.0f;
 
     float L_coeff = (45.0f/((float)_pi*h6))*invRho0;
 
-    //float coeff = 1.27324e8;
-
     glm::vec3 _ip = ip[index];
 
-    // float ipx = ip[particleId*3];
-    // float ipy = ip[particleId*3+1];
-    // float ipz = ip[particleId*3+2];
+    float invCellSize = 5.0f;
 
-    int neighboringCells[27] = {0};
+    glm::ivec3 gp = get3DGridId(invCellSize, _ip);
 
-    int num_neighbors_found = getCellNeighbors_3d(cell,  gridWidth, gridWidth*gridWidth, gridSize, neighboringCells);
-    
     float rho = 0.0f; float sum_grad_C_i = 0.0f; float C_j_sum = 0.0f;
-    for (int k = 0; k < num_neighbors_found; k++)
+    for (int _x = imax(0,gp.x-1); _x <= imin(gridSize-1,gp.x+1); _x++)
     {
-        uint nCell = neighboringCells[k];
-        uint start = cellStarts[nCell];
-        uint end = cellEnds[nCell];
-
-        if (start == end)
+        for (int _y = imax(0,gp.y-1); _y <= imin(gridSize-1,gp.y+1); _y++)
         {
-            continue;
-        }
+            for (int _z = imax(0,gp.z-1); _z <= imin(gridSize-1,gp.z+1); _z++)
+            {
+                int neighboringCellId = _x + _y*gridWidth + _z*gridWidth*gridWidth;
+                uint2 bounds = cellBounds[neighboringCellId];
+                int start = bounds.x;
+                int end = bounds.y;
 
-        //loop through neighbors
+                for (int i = start; i <= end; i++)
+                {
+                    glm::vec3 r = _ip - ip[i];
             
-        for (int i = start; i < end+1; i++)
-        {
-            int cellId_i = cellIds[i];
-            //int particleId_i = particleIds[i];
-            if (cellId_i != nCell)
-            {
-                //we've reached the end of the cell
-                break;
-            }
-
-            // float rx = ipx - ip[particleId_i*3];
-            // float ry = ipy - ip[particleId_i*3+1];
-            // float rz = ipz - ip[particleId_i*3+2];
-
-            glm::vec3 r = _ip - ip[i];
-
-            float rd2 = r.x*r.x + r.y*r.y + r.z*r.z;
-            if (rd2 < h2)
-            {
-                float W = coeff*(h2 - rd2)*(h2 - rd2)*(h2 - rd2);
-                rho += W;
-
-                float rd = sqrt(rd2);
-                float dist2 = (h-rd)*(h-rd);
-                float gradW_x = -L_coeff*(dist2*r.x);
-                float gradW_y = -L_coeff*(dist2*r.y);
-                float gradW_z = -L_coeff*(dist2*r.z);
-
-                sum_grad_C_i += gradW_x*gradW_x + gradW_y*gradW_y + gradW_z*gradW_z;
-
+                    float rd2 = r.x*r.x + r.y*r.y + r.z*r.z;
+                    if (rd2 < h2)
+                    {
+                        float W = coeff*(h2 - rd2)*(h2 - rd2)*(h2 - rd2);
+                        rho += W;
+            
+                        float rd = sqrt(rd2);
+                        float dist2 = (h-rd)*(h-rd);
+            
+                        r*= -L_coeff*dist2;
+            
+                        sum_grad_C_i += r.x*r.x + r.y*r.y + r.z*r.z;         
+                    }                    
+                }
             }
         }
     }
 
-    float C_i = (rho*invRho0) - 1.0f;
-    olambda[index] = -C_i/(sum_grad_C_i+600);
+     float C_i = (rho*invRho0) - 1.0f;
+     olambda[index] = -C_i/(sum_grad_C_i+600);
 
 }
 
-__global__ void projectDensityConstraint(int n, float h, int gridWidth,  int gridWidth2, int gridSize, float invRho0, glm::vec3* ip, glm::vec3* op, const uint* cellIds, const uint* cellStarts, const uint* cellEnds, const float* ilambda)
+__global__ void projectDensityConstraint_opt(int n, float h, int gridWidth,  int gridWidth2, int gridSize, float invRho0, const glm::vec3* ip, glm::vec3* op, const uint2* cellBounds, const float* ilambda)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
@@ -476,74 +308,50 @@ __global__ void projectDensityConstraint(int n, float h, int gridWidth,  int gri
         return;
     }
 
-    const float h2 = h*h;
-    const float h6 = h2*h2*h2;
+    float h2 = h*h;
+ 
+    float coeff = (45.0f/((float)3.141592f*h2*h2*h2));
+    float s_corr = 0.0001f;
 
-    const float _pi = 3.141592f;
-    //const int particleId = particleIds[index];
+    float lambda = ilambda[index];
+    glm::vec3 _ip = ip[index];
 
-    const float wCoeff = (15.0f/(_pi*h6));
-    const float coeff = (45.0f/((float)_pi*h6));
-    
-    //float W_dq = wCoeff*powf((0.2f),3.0f);
-    const float W_dq = wCoeff*0.2f*0.2f*0.2f;
-    //const float s_corr = 0.0001f;
+    float invCellSize = 5.0f;
 
-    const int cell = cellIds[index];
-
-    const float lambda = ilambda[index];
-    const glm::vec3 p = ip[index];
-
-    int neighboringCells[27] = {0};
-
-    const int num_neighbors_found = getCellNeighbors_3d(cell, gridWidth, gridWidth*gridWidth, gridSize, neighboringCells);
-    //int num_neighbors_found = 1;
+    glm::ivec3 gp = get3DGridId(invCellSize, _ip);
 
     float constraint_sum_x = 0.0f; float constraint_sum_y = 0.0f; float constraint_sum_z = 0.0f;  
-    for (int k = 0; k < num_neighbors_found; k++)
+
+    for (int _x = imax(0,gp.x-1); _x <= imin(gridSize-1,gp.x+1); _x++)
     {
-        const uint nCell = neighboringCells[k];
-        const uint start = cellStarts[nCell];
-        const uint end = cellEnds[nCell];
-
-        if (start == end)
+        for (int _y = imax(0,gp.y-1); _y <= imin(gridSize-1,gp.y+1); _y++)
         {
-            continue;
-        }
-
-        //loop through neighbors
-            
-        for (int i = start; i < end+1; i++)
-        {
-            const int cellId_i = cellIds[i];
-            //const int particleId_i = particleIds[i];
-            if (cellId_i != nCell)
+            for (int _z = imax(0,gp.z-1); _z <= imin(gridSize-1,gp.z+1); _z++)
             {
-                //we've reached the end of the cell
-                break;
-            }
+                int neighboringCellId = _x + _y*gridWidth + _z*gridWidth*gridWidth;
+                uint2 bounds = cellBounds[neighboringCellId];
+                uint start = bounds.x;
+                uint end = bounds.y;
 
-            const glm::vec3 r = p - ip[i];
+                for (uint i = start; i <= end; i++)
+                {
 
-            const float rd2 = r.x*r.x + r.y*r.y + r.z*r.z;
-            if (rd2 < h2)
-            {
-                const float rd = sqrt(rd2);
-                //float W_s = wCoeff*powf((h-rd),3.0f);
-                const float W_s = wCoeff*(h-rd)*(h-rd)*(h-rd);
-                const float s_corr = 0.1f*h*(W_s/W_dq)*(W_s/W_dq)*(W_s/W_dq)*(W_s/W_dq);
-
-                const float dist2 = (h-rd)*(h-rd);
+                        glm::vec3 r = _ip - ip[i];
             
-                const float gradW_x = -coeff*(dist2*r.x);
-                const float gradW_y = -coeff*(dist2*r.y);
-                const float gradW_z = -coeff*(dist2*r.z);
+                        float rd2 = r.x*r.x + r.y*r.y + r.z*r.z;
+                        if (rd2 < h2)
+                        {
+                            float rd = sqrt(rd2);
 
-                const float lambda_sum = lambda + ilambda[i] + s_corr;
+                            r *= -coeff*(h-rd)*(h-rd);
+
+                            float lambda_sum = lambda + ilambda[i] + s_corr;
                 
-                constraint_sum_x += lambda_sum * gradW_x;
-                constraint_sum_y += lambda_sum * gradW_y;
-                constraint_sum_z += lambda_sum * gradW_z;
+                            constraint_sum_x += lambda_sum * r.x;
+                            constraint_sum_y += lambda_sum * r.y;
+                        constraint_sum_z += lambda_sum * r.z;
+                    }
+                }
             }
         }
     }
@@ -575,8 +383,8 @@ __global__ void updatePositions(int n, float dt, const glm::vec3 *lastFrame_x, c
     // // ox[index*3+2] = ip[index*3+2];
 
     const float collDamp = 0.3f;
-    float wall = 1.0f;
-    float xWall = 1.0f;
+    float wall = 2.0f;
+    float xWall = 2.0f;
     
     if (newPos.y < 0.0f && ov[index].y != 0.0f)
     {
@@ -591,75 +399,75 @@ __global__ void updatePositions(int n, float dt, const glm::vec3 *lastFrame_x, c
         ov[index] *= collDamp;
 
     }
-    // if (newPos.y > wall && ov[index].y != 0.0f)
-    // {
-    //     float tColl = (newPos.y-wall) / ov[index].y;
+    if (newPos.y > wall && ov[index].y != 0.0f)
+    {
+        float tColl = (newPos.y-wall) / ov[index].y;
 
-    //     newPos -= ov[index]*(1-collDamp)*tColl;
+        newPos -= ov[index]*(1-collDamp)*tColl;
 
-    //     newPos.y = 2.0f*wall-newPos.y;
+        newPos.y = 2.0f*wall-newPos.y;
 
-    //     ov[index].y *= -1.0f;
+        ov[index].y *= -1.0f;
 
-    //     ov[index] *= collDamp;
-    // }
+        ov[index] *= collDamp;
+    }
 
-    // if (newPos.x < 0.0f && ov[index].x != 0.0f)
-    // {
-    //     float tColl = (newPos.x-0.0f) / ov[index].x;
+    if (newPos.x < 0.0f && ov[index].x != 0.0f)
+    {
+        float tColl = (newPos.x-0.0f) / ov[index].x;
 
-    //     newPos -= ov[index]*(1-collDamp)*tColl;
+        newPos -= ov[index]*(1-collDamp)*tColl;
 
-    //     newPos.x = 2.0f*0.0f-newPos.x;
+        newPos.x = 2.0f*0.0f-newPos.x;
 
-    //     ov[index].x *= -1.0f;
+        ov[index].x *= -1.0f;
 
-    //     ov[index] *= collDamp;
-    // }
+        ov[index] *= collDamp;
+    }
 
-    // if (newPos.z < 0.0f && ov[index].z != 0.0f)
-    // {
-    //     float tColl = (newPos.z-0.0f) / ov[index].z;
+    if (newPos.z < 0.0f && ov[index].z != 0.0f)
+    {
+        float tColl = (newPos.z-0.0f) / ov[index].z;
 
-    //     newPos -= ov[index]*(1-collDamp)*tColl;
+        newPos -= ov[index]*(1-collDamp)*tColl;
 
-    //     newPos.z = 2.0f*0.0f-newPos.z;
+        newPos.z = 2.0f*0.0f-newPos.z;
 
-    //     ov[index].z *= -1.0f;
+        ov[index].z *= -1.0f;
 
-    //     ov[index] *= collDamp;
-    // }
+        ov[index] *= collDamp;
+    }
 
-    // if (newPos.x > wall && ov[index].x != 0.0f)
-    // {
-    //     float tColl = (newPos.x-wall) / ov[index].x;
+    if (newPos.x > wall && ov[index].x != 0.0f)
+    {
+        float tColl = (newPos.x-wall) / ov[index].x;
 
-    //     newPos -= ov[index]*(1-collDamp)*tColl;
+        newPos -= ov[index]*(1-collDamp)*tColl;
 
-    //     newPos.x = 2.0f*wall-newPos.x;
+        newPos.x = 2.0f*wall-newPos.x;
 
-    //     ov[index].x *= -1.0f;
+        ov[index].x *= -1.0f;
 
-    //     ov[index] *= collDamp;
-    // }
+        ov[index] *= collDamp;
+    }
 
    
-    // if (newPos.z > wall && ov[index].z != 0.0f)
-    // {
-    //     float tColl = (newPos.z-wall) / ov[index].z;
+    if (newPos.z > wall && ov[index].z != 0.0f)
+    {
+        float tColl = (newPos.z-wall) / ov[index].z;
 
-    //     newPos -= ov[index]*(1-collDamp)*tColl;
+        newPos -= ov[index]*(1-collDamp)*tColl;
 
-    //     newPos.z = 2.0f*wall-newPos.z;
+        newPos.z = 2.0f*wall-newPos.z;
 
-    //     ov[index].z *= -1.0f;
+        ov[index].z *= -1.0f;
 
-    //     ov[index] *= collDamp;
-    // }
+        ov[index] *= collDamp;
+    }
 
-    ox[index*3] = ip[index].x;
-    ox[index*3+1] = ip[index].y;
-    ox[index*3+2] = ip[index].z;
+    ox[index*3] = newPos.x;
+    ox[index*3+1] = newPos.y;
+    ox[index*3+2] = newPos.z;
 
 }
 
@@ -674,7 +482,6 @@ __global__ void sortSpatialArrays(int n, const uint* sortedParticleIds, const gl
     op[index] = ip[sortedParticleIds[index]];
     ov[index] = iv[sortedParticleIds[index]];
     olf[index] = lf[sortedParticleIds[index]];
-
 }
 
 
@@ -686,79 +493,33 @@ void FluidSimulator::stepSimulation(const float dt)
     dim3 threadsPerBlock(numThreads);
     dim3 blocksPerGrid((num_fluid_particles+numThreads-1)/numThreads);
 
-    timer().startGpuTimer();
     //call explict euler per particle. Modifies dev_v and dev_p
     explictEuler<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dt, dev_x, dev_v, dev_p, dev_p_lastFrame);
     checkCUDAError("explicit euler failed");
-    timer().endGpuTimer();
-    float time = timer().getGpuElapsedTimeForPreviousOperation();
-    printf("time for explict Euler = %f\n", time);
-    cudaDeviceSynchronize();
 
     // //compute spatial hashes per particle. Modifies dev_CellIds and dev_particleIds
-    timer().startGpuTimer();
     computeSpatialHash<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, invCellSize, gridWidth, dev_p, dev_cellIds, dev_particleIds);
     checkCUDAError("computeSpatialHash failed");
-    timer().endGpuTimer();
-    float time1 = timer().getGpuElapsedTimeForPreviousOperation();
-    printf("time for compute spatial = %f\n", time1);
-    cudaDeviceSynchronize();
-
-    // //sort by cellId
-    //timer().startGpuTimer();
-    //thrustRadixSort(num_fluid_particles, dev_cellIds, dev_particleIds);
-    // uint* unsorted_ParticleIds = dev_particleIds;
-    // glm::vec3* unsorted_v = dev_v;
-    // glm::vec3* unsorted_p = dev_p;
-
-    cudaDeviceSynchronize();
+  
     thrust::sort_by_key(dev_thrust_cellIds, dev_thrust_cellIds + num_fluid_particles, dev_thrust_particleIds);
-
-    //cudaDeviceSynchronize();
-
-////__global__ void sortSpatialArrays(int n, const uint* unsortedParticleIds, const uint* sortedParticleIds, const glm::vec3* ip, const glm::vec3* iv, glm::vec3* op, glm::vec3* ov)
-
+    
     sortSpatialArrays<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dev_particleIds, dev_p, dev_v, dev_p_lastFrame, dev_sorted_p, dev_sorted_v, dev_p_lastFrame_sorted);
     checkCUDAError("sortSpatialArrays failed");
-    cudaDeviceSynchronize();
 
-    // checkCUDAError("thrust error");
-    // timer().endGpuTimer();
-    // float time2 = timer().getGpuElapsedTimeForPreviousOperation();
-    // printf("time for thrust sort = %f\n", time2);
-    // cudaDeviceSynchronize();
-
-    timer().startGpuTimer();
     // //get starting index of each cellId in the cellIds and particleIds parallel arrays and store in dev_cellStarts.
-    findCellsInArray<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, gridWidth, dev_cellIds, dev_cellStarts, dev_cellEnds);
+    findCellsInArray<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, gridWidth, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_cellBounds);
     checkCUDAError("findCellsInArray failed");
-    timer().endGpuTimer();
-    float time3 = timer().getGpuElapsedTimeForPreviousOperation();
-    printf("time for find cells in array = %f\n", time3);
 
-    cudaDeviceSynchronize();
-    
     int num_iterations = 0;
     while (num_iterations < maxIterations)
     {
-        timer().startGpuTimer();
-        computeDensity<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, dev_sorted_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_lambda);
+        computeDensity_opt<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, dev_sorted_p, dev_cellBounds, dev_lambda);
         checkCUDAError("computeDensity failed");
-        timer().endGpuTimer();
-        float time4 = timer().getGpuElapsedTimeForPreviousOperation();
-        printf("it %d computeDensity = %f\n", num_iterations, time4);
         
-        //check that this is doing what I think.
         dev_p2 = dev_sorted_p;
-
-        cudaDeviceSynchronize();
     
-        timer().startGpuTimer();
-        projectDensityConstraint<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, invRho0, dev_p2, dev_sorted_p, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_lambda);
+        projectDensityConstraint_opt<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, invRho0, dev_p2, dev_sorted_p, dev_cellBounds, dev_lambda);
         checkCUDAError("projectDensityConstraint failed");
-        timer().endGpuTimer();
-        float time6 = timer().getGpuElapsedTimeForPreviousOperation();
-        printf("it %d projectDensityConstraint = %f\n", num_iterations, time6);
 
         cudaDeviceSynchronize();
 
@@ -769,14 +530,8 @@ void FluidSimulator::stepSimulation(const float dt)
     updatePositions<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dt, dev_p_lastFrame_sorted, dev_sorted_p, dev_sorted_v, dev_x);
     checkCUDAError("updatePositions failed");
     
-    cudaDeviceSynchronize();
-
-    //glm::vec3 *tmpV = dev_v;
     dev_v = dev_sorted_v;
-    //dev_sorted_v = tmpV;
 
-    //dev_p = dev_sorted_p;
-    
     unmapGL(cudaVBO_resource);
 }
 
@@ -810,6 +565,7 @@ void FluidSimulator::cleanUpSimulation()
     cudaFree(dev_particleIds);
     cudaFree(dev_cellStarts);
     cudaFree(dev_cellEnds);
+    cudaFree(dev_cellBounds);
 
     cudaFree(dev_lambda);
 }

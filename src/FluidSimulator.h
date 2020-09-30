@@ -42,6 +42,7 @@ private:
     uint *dev_particleIds;
     uint *dev_cellStarts;
     uint *dev_cellEnds;
+    uint2 *dev_cellBounds;
 
     float h;
     float rho0;
