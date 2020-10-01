@@ -22,8 +22,7 @@ set(CUDA_SEPARABLE_COMPILATION ON)
 
 cuda_add_executable(pdb-sph ${HEADER_FILES} ${SOURCE_FILES} ${CUDA_SOURCE_FILES})
 
-
-include_directories("${CMAKE_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/include" "/usr/local/include" "${CMAKE_SOURCE_DIR}/third_party" "/usr/include/GL" "/usr/local/cuda/include")
+include_directories("${CMAKE_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/include" "/usr/local/include" "/usr/include/GL" "/usr/local/cuda/include")
 
 target_link_libraries(pdb-sph ${OPENGL_LIBRARIES} glfw ${GLEW_LIBRARIES})
 

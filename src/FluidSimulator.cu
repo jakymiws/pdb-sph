@@ -27,7 +27,7 @@ FluidSimulator::FluidSimulator(int n, float _cellSize, int _gridWidth)
     cellSize = _cellSize;
     invCellSize = 1.0f/cellSize;
 
-    x = new float[num_fluid_particles*3]; 
+    x = new float[num_fluid_particles*3]; //store it in an easy format for the gl buffer.
     p = new glm::vec3[num_fluid_particles]; 
     v = new glm::vec3[num_fluid_particles];
 
@@ -76,10 +76,7 @@ void FluidSimulator::AllocCudaArrays()
     checkCUDAError("malloc failed");
     cudaMalloc((void**)&dev_particleIds, num_fluid_particles*sizeof(uint));
     checkCUDAError("malloc failed");
-    cudaMalloc((void**)&dev_cellStarts, gridSize*sizeof(uint));
-    checkCUDAError("malloc failed");
-    cudaMalloc((void**)&dev_cellEnds, gridSize*sizeof(uint));
-    checkCUDAError("malloc failed");
+
     cudaMalloc((void**)&dev_cellBounds, gridSize*sizeof(uint2));
     checkCUDAError("malloc failed");
 
@@ -121,10 +118,8 @@ void unmapGL(struct cudaGraphicsResource *cuda_resource)
 void FluidSimulator::InitGL()
 {
     //create GL VBO and store in global var.
-    //glGenVertexArrays(1, &glVAO);
     glGenBuffers(1, &glVBO);
 
-    //glBindVertexArray(glVAO);
     glBindBuffer(GL_ARRAY_BUFFER, glVBO);
     glBufferData(GL_ARRAY_BUFFER, num_fluid_particles*3*sizeof(float), 0, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -144,12 +139,11 @@ void FluidSimulator::RandomPositionStart()
 {
     for (int i = 0; i < num_fluid_particles; i++)
     {
-        float xCoord = randomFloatRangef(0.5f, 1.5f);
-        float yCoord = randomFloatRangef(0.01f, 0.5f);
-        float zCoord = randomFloatRangef(0.5f, 1.5f);
+        float xCoord = randomFloatRangef(0.0f, 1.0f);
+        float yCoord = randomFloatRangef(0.0f, 1.0f);
+        float zCoord = randomFloatRangef(0.0f, 1.0f);
 
         x[i*3] = xCoord; x[i*3+1] = yCoord; x[i*3+2] = zCoord;
-        //v[i*3] = 0.0f;   v[i*3+1] = 0.0f;   v[i*3+2] = 0.0f; 
         v[i] = glm::vec3(0.0f);
     }
 }
@@ -172,7 +166,7 @@ __global__ void computeSpatialHash(const int n, const float inv_cell_size, const
 }
 
 //Populates the cellBounds array with the index of the positions in each grid cell for easier access
-__global__ void findCellsInArray(const int n, const int gridWidth, const uint* iCellIds, uint* cellStarts, uint* cellEnds, uint2* cellBounds)
+__global__ void findCellsInArray(const int n, const int gridWidth, const uint* iCellIds, uint2* cellBounds)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
@@ -182,15 +176,11 @@ __global__ void findCellsInArray(const int n, const int gridWidth, const uint* i
     //the first cell in the array starts at the 0th position.
     if (index == 0)
     {
-        cellStarts[iCellIds[index]] = 0;
-        cellBounds[iCellIds[index]].x = 0;
-        
+        cellBounds[iCellIds[index]].x = 0;        
     } else {
         if (iCellIds[index] != iCellIds[index-1])
         {
-            cellStarts[iCellIds[index]] = index; 
-            cellBounds[iCellIds[index]].x = index;
-            
+            cellBounds[iCellIds[index]].x = index;            
         }
     }
 
@@ -198,12 +188,9 @@ __global__ void findCellsInArray(const int n, const int gridWidth, const uint* i
     {
         if(iCellIds[index] != iCellIds[index+1])
         {
-            cellEnds[iCellIds[index]] = index;
             cellBounds[iCellIds[index]].y = index;
-
         }
     } else {
-        cellEnds[iCellIds[index]] = index;
         cellBounds[iCellIds[index]].y = index;
     }
 }
@@ -221,10 +208,6 @@ __global__ void explictEuler(int n, const float dt, float* ix, glm::vec3* ov, gl
     float velo_damp = 0.99f;
     float g = -9.8f;
 
-    float f_ext_x = 0.0f;
-    float f_ext_y = g;
-    float f_ext_z = 0.0f;
-
     ov[index] += dt*glm::vec3(0.0f, g, 0.0f);
     ov[index] *= velo_damp;
 
@@ -236,7 +219,7 @@ __device__ glm::ivec3 get3DGridId(const float invCellSize, const glm::vec3 p)
     return glm::ivec3((int)(p.x*invCellSize), (int)(p.y*invCellSize), (int)(p.z*invCellSize));
 }
 
-__global__ void computeDensity_opt(int n, float h, int gridWidth, int gridWidth2, int gridSize, const glm::vec3* ip, const uint2* cellBounds, float* olambda)
+__global__ void computeDensity(int n, float h, int gridWidth, int gridWidth2, int gridSize, const glm::vec3* ip, const uint2* cellBounds, float* olambda)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
@@ -261,7 +244,7 @@ __global__ void computeDensity_opt(int n, float h, int gridWidth, int gridWidth2
 
     glm::ivec3 gp = get3DGridId(invCellSize, _ip);
 
-    float rho = 0.0f; float sum_grad_C_i = 0.0f; float C_j_sum = 0.0f;
+    float rho = 0.0f; float sum_grad_C_i = 0.0f;
     for (int _x = imax(0,gp.x-1); _x <= imin(gridSize-1,gp.x+1); _x++)
     {
         for (int _y = imax(0,gp.y-1); _y <= imin(gridSize-1,gp.y+1); _y++)
@@ -295,12 +278,12 @@ __global__ void computeDensity_opt(int n, float h, int gridWidth, int gridWidth2
         }
     }
 
-     float C_i = (rho*invRho0) - 1.0f;
-     olambda[index] = -C_i/(sum_grad_C_i+600);
+    float C_i = (rho*invRho0) - 1.0f;
+    olambda[index] = -C_i/(sum_grad_C_i+600);
 
 }
 
-__global__ void projectDensityConstraint_opt(int n, float h, int gridWidth,  int gridWidth2, int gridSize, float invRho0, const glm::vec3* ip, glm::vec3* op, const uint2* cellBounds, const float* ilambda)
+__global__ void projectDensityConstraint(int n, float h, int gridWidth,  int gridWidth2, int gridSize, float invRho0, const glm::vec3* ip, glm::vec3* op, const uint2* cellBounds, const float* ilambda)
 {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index >= n)
@@ -335,20 +318,19 @@ __global__ void projectDensityConstraint_opt(int n, float h, int gridWidth,  int
 
                 for (uint i = start; i <= end; i++)
                 {
-
-                        glm::vec3 r = _ip - ip[i];
+                    glm::vec3 r = _ip - ip[i];
             
-                        float rd2 = r.x*r.x + r.y*r.y + r.z*r.z;
-                        if (rd2 < h2)
-                        {
-                            float rd = sqrt(rd2);
+                    float rd2 = r.x*r.x + r.y*r.y + r.z*r.z;
+                    if (rd2 < h2)
+                    {
+                        float rd = sqrt(rd2);
 
-                            r *= -coeff*(h-rd)*(h-rd);
+                        r *= -coeff*(h-rd)*(h-rd);
 
-                            float lambda_sum = lambda + ilambda[i] + s_corr;
+                        float lambda_sum = lambda + ilambda[i] + s_corr;
                 
-                            constraint_sum_x += lambda_sum * r.x;
-                            constraint_sum_y += lambda_sum * r.y;
+                        constraint_sum_x += lambda_sum * r.x;
+                        constraint_sum_y += lambda_sum * r.y;
                         constraint_sum_z += lambda_sum * r.z;
                     }
                 }
@@ -368,24 +350,15 @@ __global__ void updatePositions(int n, float dt, const glm::vec3 *lastFrame_x, c
         return;
     }
 
-     glm::vec3 newPos = ip[index];
+    glm::vec3 newPos = ip[index];
 
-     //ov[index] = (ip[index] - glm::vec3(ox[index*3], ox[index*3+1], ox[index*3+2]))/dt;
-     ov[index] = (ip[index] - lastFrame_x[index])/dt;
-    // //ox[index] = ip[index];
-
-    // // ov[index*3] = (ip[index*3]-ox[index*3])/dt;
-    // // ov[index*3+1] = (ip[index*3+1]-ox[index*3+1])/dt;
-    // // ov[index*3+2] = (ip[index*3+2]-ox[index*3+2])/dt;
-    
-    // // ox[index*3] = ip[index*3];
-    // // ox[index*3+1] = ip[index*3+1];
-    // // ox[index*3+2] = ip[index*3+2];
+    ov[index] = (ip[index] - lastFrame_x[index])/dt;
 
     const float collDamp = 0.3f;
     float wall = 2.0f;
-    float xWall = 2.0f;
-    
+
+    //Collision testing - this messier way to do things seems to be faster than a more modular for
+    //loop based version so I'm keeping this for now although I'd like to improve it.
     if (newPos.y < 0.0f && ov[index].y != 0.0f)
     {
         float tColl = (newPos.y-0.0f) / ov[index].y;
@@ -497,28 +470,30 @@ void FluidSimulator::stepSimulation(const float dt)
     explictEuler<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dt, dev_x, dev_v, dev_p, dev_p_lastFrame);
     checkCUDAError("explicit euler failed");
 
-    // //compute spatial hashes per particle. Modifies dev_CellIds and dev_particleIds
+    //compute spatial hashes per particle. Modifies dev_CellIds and dev_particleIds
     computeSpatialHash<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, invCellSize, gridWidth, dev_p, dev_cellIds, dev_particleIds);
     checkCUDAError("computeSpatialHash failed");
   
+    //sort the particle ids according to cellIds
     thrust::sort_by_key(dev_thrust_cellIds, dev_thrust_cellIds + num_fluid_particles, dev_thrust_particleIds);
     
+    //align the spatial variable arrays with the sorted particleIds to improve global memory coalescing.
     sortSpatialArrays<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, dev_particleIds, dev_p, dev_v, dev_p_lastFrame, dev_sorted_p, dev_sorted_v, dev_p_lastFrame_sorted);
     checkCUDAError("sortSpatialArrays failed");
 
-    // //get starting index of each cellId in the cellIds and particleIds parallel arrays and store in dev_cellStarts.
-    findCellsInArray<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, gridWidth, dev_cellIds, dev_cellStarts, dev_cellEnds, dev_cellBounds);
+    //get starting index of each cellId in the cellIds and particleIds parallel arrays and store in dev_cellStarts.
+    findCellsInArray<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, gridWidth, dev_cellIds, dev_cellBounds);
     checkCUDAError("findCellsInArray failed");
 
     int num_iterations = 0;
     while (num_iterations < maxIterations)
     {
-        computeDensity_opt<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, dev_sorted_p, dev_cellBounds, dev_lambda);
+        computeDensity<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, dev_sorted_p, dev_cellBounds, dev_lambda);
         checkCUDAError("computeDensity failed");
         
         dev_p2 = dev_sorted_p;
     
-        projectDensityConstraint_opt<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, invRho0, dev_p2, dev_sorted_p, dev_cellBounds, dev_lambda);
+        projectDensityConstraint<<<blocksPerGrid, threadsPerBlock>>>(num_fluid_particles, h, gridWidth, gridWidth2, gridSize, invRho0, dev_p2, dev_sorted_p, dev_cellBounds, dev_lambda);
         checkCUDAError("projectDensityConstraint failed");
 
         cudaDeviceSynchronize();
@@ -553,6 +528,7 @@ int FluidSimulator::getNumFluidParticles(){ return num_fluid_particles; }
 
 void FluidSimulator::cleanUpSimulation()
 {
+    printf("cleaning up\n");
     cudaFree(dev_p);
     cudaFree(dev_sorted_p);
     cudaFree(dev_sorted_v);
@@ -563,8 +539,8 @@ void FluidSimulator::cleanUpSimulation()
     cudaFree(dev_v);
     cudaFree(dev_cellIds);
     cudaFree(dev_particleIds);
-    cudaFree(dev_cellStarts);
-    cudaFree(dev_cellEnds);
+    //cudaFree(dev_cellStarts);
+    //cudaFree(dev_cellEnds);
     cudaFree(dev_cellBounds);
 
     cudaFree(dev_lambda);

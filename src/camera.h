@@ -50,8 +50,9 @@ public:
 
         Position = position;
         WorldUp = up;
-        Yaw = 32.8f;
-        Pitch =  1.4f;
+
+        Yaw = yaw;
+        Pitch =  pitch;
         updateCameraVectors();
     }
     // constructor with scalar values
@@ -82,7 +83,7 @@ public:
             Position -= Right * velocity;
         if (direction == RIGHT)
             Position += Right * velocity;
-        //printf("pos = %f,%f,%f\n", Position.x, Position.y, Position.z);
+        printf("pos = %f,%f,%f\n", Position.x, Position.y, Position.z);
     }
 
     // processes input received from a mouse input system. Expects the offset value in both the x and y direction.
@@ -130,7 +131,7 @@ private:
         // also re-calculate the Right and Up vector
         Right = glm::normalize(glm::cross(Front, WorldUp));  // normalize the vectors, because their length gets closer to 0 the more you look up or down which results in slower movement.
         Up    = glm::normalize(glm::cross(Right, Front));
-      //  printf("Y = %f, p = %f\n", Yaw, Pitch);
+        //printf("Y = %f, p = %f\n", Yaw, Pitch);
     }
 };
 #endif
